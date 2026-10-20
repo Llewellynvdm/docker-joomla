@@ -1,42 +1,49 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.."
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-check() { jq --arg mode helper -f scripts/validate-config.jq "$1" >/dev/null; }
-check versions-helper.json
+
+# Validate the maintained helper and the current resolved snapshot independently.
+jq --arg mode helper -f "$repo/scripts/validate-config.jq" "$repo/versions-helper.json" >/dev/null
+jq --slurpfile helper "$repo/versions-helper.json" --arg fixture current \
+    -f "$repo/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repo/versions.json}" \
+    | jq --arg mode resolved -f "$repo/scripts/validate-config.jq" >/dev/null
+
+# Malformed input cases use one isolated fake series, never a maintained release.
+jq --slurpfile helper "$repo/versions-helper.json" --arg fixture synthetic \
+    -f "$repo/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repo/versions.json}" \
+    | jq '.["100.0"]' > "$work/settings.json"
+check() {
+    jq '{"100.0": .}' "$1" | jq --arg mode helper -f "$repo/scripts/validate-config.jq" >/dev/null
+}
 reject() {
-    jq "$1" versions-helper.json > "$work/config.json"
-    if check "$work/config.json" >"$work/log" 2>&1; then
+    jq "$1" "$work/settings.json" > "$work/invalid.json"
+    if check "$work/invalid.json" >"$work/log" 2>&1; then
         echo "FAIL: accepted invalid configuration: $1" >&2; exit 1
     fi
 }
-reject '.["6.2"].states.stable.version = "6.3.0"'
-reject '.["6.2"].states.stable.version = "6.2.1-rc1"'
-reject '.["6.2"].states.nightly = .["6.2"].states.stable'
-reject '.["6.2"].states.stable.aliases = ""'
-reject '.["6.2"].states.stable.aliases = false'
-reject '.["6.2"].states.stable.aliases = [true]'
-reject '.["6.2"].states.stable.aliases = [""]'
-reject '.["6.2"].states.stable.package = "https://example.org/package.tar.zst"'
-reject '.["6.2"].states.stable.sha512 = "null"'
-reject '.["6.2"].php = "8.1"'
-reject '.["6.2"].variants = ["apache-dev"]'
-reject '.["6.2"].variants = ["apache", "apache"]'
-reject '.["6.2"].variant = "missing"'
-reject '.["6.2"].variant = ["apache"]'
-reject '.["6.2"].packageType = "zip"'
-reject '.["6.2"].packageType = false'
-reject '.["6.2"].states.stable.packageType = false'
-reject '.["6.2"].phpVersions["8.4"].pecl.redis = "latest"'
-reject '.["6.2"].development.xdebug.sha256 = "bad"'
-reject '.["5.4"].development = .["6.2"].development'
-reject '.["6.2"].states = {}'
-reject '{"../bad": .["6.2"]}'
-for change in '.["6.2"].states.stable.aliases = []' '.["6.2"].states.stable.aliases = null' 'del(.["6.2"].states.stable.aliases)'; do
-    jq "$change" versions-helper.json > "$work/config.json"
-    check "$work/config.json"
+reject '.states.stable.version = "101.0.0"'
+reject '.states.stable.version += "-rc1"'
+reject '.states.nightly = .states.stable'
+for aliases in '""' 'false' '[true]' '[""]'; do
+    reject ".states.stable.aliases = $aliases"
 done
-jq '.["6.2"].states = {alpha:{version:"6.2.1-alpha1",aliases:[]}, beta:{version:"6.2.1-beta2",aliases:[]}, rc:{version:"6.2.1-rc1",aliases:[]}}' versions-helper.json > "$work/config.json"
-check "$work/config.json"
+reject 'del(.states.stable.sha512)'
+reject '.states.stable.sha512 = "invalid"'
+reject '.php = "missing"'
+reject '.variants = ["apache-dev"]'
+reject '.variants += [.variants[0]]'
+reject '.variant = "missing"'
+reject '.variant = [.variant]'
+reject '.packageType = "zip"'
+reject '.packageType = false'
+reject '.states.stable.packageType = false'
+reject '.phpVersions[.php].pecl.redis = "latest"'
+reject '.development.xdebug.sha256 = "invalid"'
+reject '.states = {}'
+for change in '.states.stable.aliases = []' '.states.stable.aliases = null' 'del(.states.stable.aliases)' 'del(.states.stable)'; do
+    jq "$change" "$work/settings.json" > "$work/valid.json"
+    check "$work/valid.json"
+done
 echo 'Configuration validation tests passed.'
