@@ -1,107 +1,130 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-[ -f versions.json ] # run "versions.sh" first
+cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+
+if [[ ! -f versions.json ]]; then
+  echo 'versions.json not found; run ./versions.sh first.' >&2
+  exit 1
+fi
+
+# Resolve and validate every selector before writing any build context.
+jq -e --arg mode resolved -f scripts/validate-config.jq versions.json >/dev/null
+selectors="$(jq -cn --args '$ARGS.positional' -- "$@")"
+tracks="$(jq -er --argjson selectors "$selectors" '
+  . as $config
+  | [if $selectors == [] then
+       to_entries[] | .key as $series | .value.states | keys[] | [$series, .]
+     else
+       $selectors[] | rtrimstr("/") | split("/") as $parts
+       | if ($parts | length) == 1 and $config[$parts[0]] != null then
+           $config[$parts[0]].states | keys[] | [$parts[0], .]
+         elif ($parts | length) == 2 and $config[$parts[0]].states[$parts[1]] != null then
+           $parts
+         else error("Unknown release selector: " + ($parts | join("/"))) end
+     end]
+  | unique | .[] | @tsv
+' versions.json)"
+
+staging="$(mktemp -d .template-staging.XXXXXXXX)"
+trap 'rm -rf "$staging"' EXIT
 
 jqt='.jq-template.awk'
-if [ -n "${BASHBREW_SCRIPTS:-}" ]; then
+if [[ -n "${BASHBREW_SCRIPTS:-}" ]]; then
   jqt="$BASHBREW_SCRIPTS/jq-template.awk"
-elif [ "$BASH_SOURCE" -nt "$jqt" ]; then
-  wget -qO "$jqt" 'https://github.com/docker-library/bashbrew/raw/5f0c26381fb7cc78b2d217d58007800bdcfbcfa1/scripts/jq-template.awk'
+elif [[ ! -s "$jqt" ]]; then
+  curl --fail --silent --show-error --location --retry 3 \
+    'https://raw.githubusercontent.com/docker-library/bashbrew/5f0c26381fb7cc78b2d217d58007800bdcfbcfa1/scripts/jq-template.awk' \
+    -o "$staging/jq-template.awk"
+  echo "94821535d351a86f6f634d2e7de9f23c81836ca23cc7c0a3de08416922ccda40  $staging/jq-template.awk" | sha256sum --check --status
+  mv "$staging/jq-template.awk" "$jqt"
+fi
+[[ -s "$jqt" ]] || { echo "Template engine not found: $jqt" >&2; exit 1; }
+if [[ -z "${BASHBREW_SCRIPTS:-}" ]]; then
+  echo "94821535d351a86f6f634d2e7de9f23c81836ca23cc7c0a3de08416922ccda40  $jqt" | sha256sum --check --status
 fi
 
-# if no versions passed we load from versions.json
-if [ "$#" -eq 0 ]; then
-  versions="$(jq -r 'keys | map(@sh) | join(" ")' versions.json)"
-  eval "set -- $versions"
-fi
-
-# the warning message to not update the docker files directly
 generated_warning() {
-  cat <<-EOH
-		#
-		# NOTE: THIS DOCKERFILE IS GENERATED VIA "apply-templates.sh"
-		#
-		# PLEASE DO NOT EDIT IT DIRECTLY.
-		#
-
-	EOH
+  cat <<'EOH'
+#
+# NOTE: THIS DOCKERFILE IS GENERATED VIA "apply-templates.sh"
+#
+# PLEASE DO NOT EDIT IT DIRECTLY.
+#
+EOH
 }
 
-# set the Joomla maintainers of these docker images
-joomlaMaintainers="$( jq -cr '. | map(.firstname + " " + .lastname + " <" + .email + "> (@" + .github + ")") | join(", ")' maintainers.json)"
+joomlaMaintainers="$(jq -cr 'map(.firstname + " " + .lastname + " <" + .email + "> (@" + .github + ")") | join(", ")' maintainers.json)"
 export joomlaMaintainers
+directories=()
 
-# loop over the version set above
-for version; do
-  export version
-  # see if we version specific entrypoint file
-  if [[ -e "docker-entrypoint-${version}.sh" ]]; then
-    docker_entrypoint="docker-entrypoint-${version}.sh"
-  else
-    docker_entrypoint="docker-entrypoint.sh"
+while IFS=$'\t' read -r version state; do
+  export version state
+  details="$(jq -c --arg series "$version" '.[$series]' versions.json)"
+  release="$(jq -c --arg state "$state" '.states[$state]' <<<"$details")"
+  joomlaVersion="$(jq -r '.version' <<<"$release")"
+  joomlaSha512="$(jq -r '.sha512' <<<"$release")"
+  joomlaPackage="$(jq -r '.package' <<<"$release")"
+  joomlaPackageType="$(jq -r '.packageType' <<<"$release")"
+  export joomlaVersion joomlaSha512 joomlaPackage joomlaPackageType
+
+  docker_entrypoint='docker-entrypoint.sh'
+  if [[ -f "docker-entrypoint-$version.sh" ]]; then
+    docker_entrypoint="docker-entrypoint-$version.sh"
   fi
-  # get this Joomla version details
-  joomlaVersionDetails="$(jq -r '.[env.version]' versions.json)"
-  # get this Joomla version
-  joomlaVersion="$(echo "${joomlaVersionDetails}" | jq -r '.version')"
-  export joomlaVersion
-  # get the PHP version
-  phpVersions="$(echo "${joomlaVersionDetails}" | jq -r '.phpVersions | map(@sh) | join(" ")')"
-  eval "phpVersions=( $phpVersions )"
-  # get the variants
-  variants="$(echo "${joomlaVersionDetails}" | jq -r '.variants | map(@sh) | join(" ")')"
-  eval "variants=( $variants )"
-  # get this version Joomla Sha512
-  joomlaSha512="$(echo "${joomlaVersionDetails}" | jq -r '.sha512')"
-  export joomlaSha512
-  # get this version Joomla Package URL
-  joomlaPackage="$(echo "${joomlaVersionDetails}" | jq -r '.package')"
-  export joomlaPackage
-  # get this version Joomla Package Type
-  joomlaPackageType="$(echo "${joomlaVersionDetails}" | jq -r '.packageType')"
-  export joomlaPackageType
+
+  mapfile -t phpVersions < <(jq -r '.phpVersions | keys[]' <<<"$details")
+  mapfile -t variants < <(jq -r '.variants[]' <<<"$details")
+  developmentVariants=(0)
+  if jq -e '.development != null' <<<"$details" >/dev/null; then
+    developmentVariants+=(1)
+  fi
 
   for phpVersion in "${phpVersions[@]}"; do
     export phpVersion
-
-    # get the pecl values (we may want to move this to versions.json)
-    peclValues="$(jq -r '.[env.version].phpVersions[env.phpVersion].pecl' versions-helper.json)"
-    # get the imagick value
-    pecl_imagick="$(echo "${peclValues}" | jq -r '.imagick')"
-    export pecl_imagick
-    # get the APCu value
-    pecl_APCu="$(echo "${peclValues}" | jq -r '.APCu')"
-    export pecl_APCu
-    # get the memcached value
-    pecl_memcached="$(echo "${peclValues}" | jq -r '.memcached')"
-    export pecl_memcached
-    # get the redis value
-    pecl_redis="$(echo "${peclValues}" | jq -r '.redis')"
-    export pecl_redis
-    # get the mcrypt value
-    pecl_mcrypt="$(echo "${peclValues}" | jq -r '.mcrypt')"
-    export pecl_mcrypt
+    peclValues="$(jq -c --arg php "$phpVersion" '.phpVersions[$php].pecl' <<<"$details")"
+    pecl_imagick="$(jq -r '.imagick' <<<"$peclValues")"
+    pecl_APCu="$(jq -r '.APCu' <<<"$peclValues")"
+    pecl_memcached="$(jq -r '.memcached' <<<"$peclValues")"
+    pecl_redis="$(jq -r '.redis' <<<"$peclValues")"
+    export pecl_imagick pecl_APCu pecl_memcached pecl_redis
 
     for variant in "${variants[@]}"; do
       export variant
+      for development in "${developmentVariants[@]}"; do
+        export development
+        dir="$version/$state/php$phpVersion/$variant"
+        if [[ "$development" == 1 ]]; then
+          dir+='-dev'
+          composerVersion="$(jq -r '.development.composer.version' <<<"$details")"
+          composerSha256="$(jq -r '.development.composer.sha256' <<<"$details")"
+          xdebugVersion="$(jq -r '.development.xdebug.version' <<<"$details")"
+          xdebugSha256="$(jq -r '.development.xdebug.sha256' <<<"$details")"
+          export composerVersion composerSha256 xdebugVersion xdebugSha256
+        fi
 
-      # the path to this variant folder
-      dir="$version/php$phpVersion/$variant"
-      mkdir -p "$dir"
-
-      echo "processing $dir ..."
-
-      # move the entrypoint file into place
-      cp -a "$docker_entrypoint" "$dir/docker-entrypoint.sh"
-      # move the make database file into place
-      cp -a "makedb.php" "$dir/makedb.php"
-
-      {
-        generated_warning
-        gawk -f "$jqt" Dockerfile.template
-      } >"$dir/Dockerfile"
+        mkdir -p "$staging/$dir"
+        cp -p "$docker_entrypoint" "$staging/$dir/docker-entrypoint.sh"
+        cp -p makedb.php "$staging/$dir/makedb.php"
+        if [[ "$development" == 1 ]]; then
+          cp -p development/zz-joomla-development.ini development/zz-xdebug-settings.ini "$staging/$dir/"
+        fi
+        {
+          generated_warning
+          gawk -f "$jqt" Dockerfile.template
+        } >"$staging/$dir/Dockerfile"
+        directories+=("$dir")
+      done
     done
   done
-done
+done <<<"$tracks"
 
+# Publish only after all selected Dockerfiles rendered successfully. Old contexts
+# and unrelated files are deliberately left alone; removal is a maintainer task.
+for dir in "${directories[@]}"; do
+  mkdir -p "$dir"
+  for file in "$staging/$dir/"*; do
+    mv -f "$file" "$dir/${file##*/}"
+  done
+  echo "processed $dir"
+done

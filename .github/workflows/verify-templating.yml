@@ -4,19 +4,47 @@ on:
   pull_request:
   push:
 
+permissions:
+  contents: read
+
 defaults:
   run:
-    shell: 'bash -Eeuo pipefail -x {0}'
+    shell: bash -Eeuo pipefail {0}
 
 jobs:
   apply-templates:
-    name: Check For Uncomitted Changes
+    name: Validate generators and committed outputs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - name: Apply Templates
-        run: ./apply-templates.sh
-      - name: Check Git Status
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install generator test dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gawk jq shellcheck
+      - name: Test configuration, resolution, tags and templates
         run: |
-          status="$(git status --short)"
-          [ -z "$status" ]
+          shellcheck update.sh versions.sh apply-templates.sh generate-stackbrew-library.sh tests/*.sh
+          ./tests/test-config.sh
+          ./tests/test-versions.sh
+          ./tests/test-tags.sh
+          ./tests/test-manifest.sh
+          ./tests/test-templates.sh
+      - name: Verify committed generated outputs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          # The initial source-only migration retains the legacy generated snapshot.
+          # Image CI still regenerates and builds every active context in this case.
+          if ! jq -e 'all(.[]; type == "object" and has("states"))' versions.json >/dev/null; then
+            echo '::notice::Generator migration: run ./update.sh --force and commit the generated files before submitting an Official Images manifest. Image CI builds the new contexts directly.'
+            exit 0
+          fi
+          ./update.sh
+          jq -c -f scripts/tags.jq versions.json > "$RUNNER_TEMP/contexts.json"
+          mapfile -t contexts < <(jq -r '.[].directory' "$RUNNER_TEMP/contexts.json")
+          status=$(git status --porcelain -- versions.json "${contexts[@]}")
+          if [[ -n "$status" ]]; then
+            printf '%s\n' "$status"
+            echo '::error::Run ./update.sh and commit the active generated contexts and versions.json.'
+            exit 1
+          fi

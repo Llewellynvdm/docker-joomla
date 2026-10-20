@@ -1,185 +1,113 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-self="$(basename "$BASH_SOURCE")"
-cd "$(dirname "$(readlink -f "$BASH_SOURCE")")"
+cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 
-if [ "$#" -eq 0 ]; then
-  versions="$(jq -r 'keys | map(@sh) | join(" ")' versions.json)"
-  eval "set -- $versions"
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+if [[ "${1:-}" == --help ]]; then
+  printf 'Usage: %s [series | series/state ...]\n' "${0##*/}"
+  printf 'Generate a manifest from committed contexts in versions.json. No directories are removed.\n'
+  exit 0
 fi
 
-# sort version numbers with highest first
-IFS=$'\n'
-set -- $(sort -rV <<<"$*")
-unset IFS
-
-# get the most recent commit which modified any of "$@"
-fileCommit() {
-  git log -1 --format='format:%H' HEAD -- "$@"
-}
-
-# get the most recent commit which modified "$1/Dockerfile" or any file COPY'd from "$1/Dockerfile"
-dirCommit() {
-  local dir="$1"
-  shift
-  (
-    cd "$dir"
-    fileCommit \
-      Dockerfile \
-      $(git show HEAD:./Dockerfile | awk '
-				toupper($1) == "COPY" {
-					for (i = 2; i < NF; i++) {
-						if ($i ~ /^--from=/) {
-							next
-						}
-						print $i
-					}
-				}
-			')
-  )
-}
-
-gawkParents='
-	{ cmd = toupper($1) }
-	cmd == "FROM" {
-		print $2
-		next
-	}
-	cmd == "COPY" {
-		for (i = 2; i < NF; i++) {
-			if ($i ~ /^--from=/) {
-				gsub(/^--from=/, "", $i)
-				print $i
-				next
-			}
-		}
-	}
-'
-
-getArches() {
-  local repo="$1"
-  shift
-
-  local parentRepoToArchesStr
-  parentRepoToArchesStr="$(
-    find -name 'Dockerfile' -exec gawk "$gawkParents" '{}' + |
-      sort -u |
-      gawk -v officialImagesUrl='https://github.com/docker-library/official-images/raw/master/library/' '
-				$1 !~ /^('"$repo"'|scratch|.*\/.*)(:|$)/ {
-					printf "%s%s\n", officialImagesUrl, $1
-				}
-			' |
-      xargs -r bashbrew cat --format '["{{ .RepoName }}:{{ .TagName }}"]="{{ join " " .TagEntry.Architectures }}"'
-  )"
-  eval "declare -g -A parentRepoToArches=( $parentRepoToArchesStr )"
-}
-getArches 'joomla'
-
-# get the Joomla maintainers of these docker images
-joomlaMaintainers="$(jq -cr '. | map(.firstname + " " + .lastname + " <" + .email + "> (@" + .github + ")") | join(",\n             ")' maintainers.json)"
-
-cat <<-EOH
-# this file is generated via https://github.com/joomla-docker/docker-joomla/blob/$(fileCommit "$self")/$self
-
-Maintainers: $joomlaMaintainers
-GitRepo: https://github.com/joomla-docker/docker-joomla.git
-EOH
-
-# prints "$2$1$3$1...$N"
-join() {
-  local sep="$1"
-  shift
-  local out
-  printf -v out "${sep//%/%%}%s" "$@"
-  echo "${out#$sep}"
-}
-
-for version; do
-  export version
-  # get this Joomla versions PHP versions
-  phpVersions="$(jq -r '.[env.version].phpVersions | map(@sh) | join(" ")' versions.json)"
-  eval "phpVersions=( $phpVersions )"
-  # get this Joomla versions default PHP version
-  defaultPhpVersion="$(jq -r '.[env.version].php' versions.json)"
-  # get this Joomla versions variants
-  variants="$(jq -r '.[env.version].variants | map(@sh) | join(" ")' versions.json)"
-  eval "variants=( $variants )"
-  # get this Joomla versions default variant
-  defaultVariant="$(jq -r '.[env.version].variant' versions.json)"
-  # get the Joomla versions full version eg: 4.0.0
-  fullVersion="$(jq -r '.[env.version].version' versions.json)"
-  # check if this Joomla version is a Release Candidate
-  rcVersion="${version%-rc}"
-  versionAliases=()
-  while [ "$fullVersion" != "$rcVersion" -a "${fullVersion%[.]*}" != "$fullVersion" ]; do
-    versionAliases+=($fullVersion)
-    fullVersion="${fullVersion%[.]*}"
+# Validate the entire tag namespace even when only some tracks are requested.
+configuration="$(jq --arg mode resolved -f scripts/validate-config.jq versions.json)"
+plan="$(jq -c -f scripts/tags.jq <<<"$configuration")"
+if (($#)); then
+  selected='[]'
+  for selector; do
+    selector="${selector%/}"
+    jq -e --arg selector "$selector" 'any(.[]; .series == $selector or (.series + "/" + .state) == $selector)' \
+      <<<"$plan" >/dev/null || die "unknown release selector: $selector"
+    selected="$(jq -c --arg selector "$selector" '. + [$selector]' <<<"$selected")"
   done
-  # get all that aliases of this Joomla version
-  aliases="$(jq -r '.[env.version].aliases | map(@sh) | join(" ")' versions.json)"
-  eval "aliases=( $aliases )"
-  # add the short version an all aliases found
-  versionAliases+=(
-    $version
-    ${aliases[@]:-}
-  )
+  plan="$(jq -c --argjson selected "$selected" \
+    'map(select(.series as $series | (.series + "/" + .state) as $track | any($selected[]; . == $series or . == $track)))' \
+    <<<"$plan")"
+fi
 
-  for phpVersion in "${phpVersions[@]}"; do
-    phpVersion="php$phpVersion"
-    for variant in "${variants[@]}"; do
-      dir="$version/$phpVersion/$variant"
-      # check if the docker file exist, else skip
-      [ -f "$dir/Dockerfile" ] || continue
-      # get the commit hash from this docker file
-      commit="$(dirCommit "$dir")"
+command -v bashbrew >/dev/null || die 'bashbrew is required to resolve the PHP image architectures'
+git rev-parse --verify HEAD >/dev/null
 
-      phpVersionAliases=("${versionAliases[@]/%/-$phpVersion}")
-      phpVersionAliases=("${phpVersionAliases[@]//latest-/}")
+# Buffer output so a failed validation never emits a plausible partial manifest.
+output="$(mktemp)"
+trap 'rm -f "$output"' EXIT
 
-      variantSuffixes=("$variant")
+maintainers="$(jq -er 'map(.firstname + " " + .lastname + " <" + .email + "> (@" + .github + ")") | join(",\n             ")' maintainers.json)"
+git_repo="${STACKBREW_GIT_REPO:-https://github.com/joomla-docker/docker-joomla.git}"
+git_fetch="${STACKBREW_GIT_FETCH:-}"
+[[ "$git_repo" != *$'\n'* && "$git_repo" != *$'\r'* ]] || die 'invalid STACKBREW_GIT_REPO'
+[[ "$git_fetch" != *$'\n'* && "$git_fetch" != *$'\r'* ]] || die 'invalid STACKBREW_GIT_FETCH'
+{
+  printf '# Generated by generate-stackbrew-library.sh\n\n'
+  printf 'Maintainers: %s\nGitRepo: %s\n' "$maintainers" "$git_repo"
+  if [[ -n "$git_fetch" ]]; then
+    printf 'GitFetch: %s\n' "$git_fetch"
+  fi
+} >"$output"
 
-      variantAliases=()
-      phpVersionVariantAliases=()
-      for variantSuffix in "${variantSuffixes[@]}"; do
-        variantAliases+=("${versionAliases[@]/%/-$variantSuffix}")
-        phpVersionVariantAliases+=("${phpVersionAliases[@]/%/-$variantSuffix}")
-      done
-      variantAliases=("${variantAliases[@]//latest-/}")
-      phpVersionVariantAliases=("${phpVersionVariantAliases[@]//latest-/}")
+declare -A parent_architectures=()
+while IFS= read -r context; do
+  directory="$(jq -r '.directory' <<<"$context")"
+  [[ -f "$directory/Dockerfile" ]] || die "missing $directory/Dockerfile; run ./update.sh and commit the generated files"
+  git ls-files --error-unmatch -- "$directory/Dockerfile" >/dev/null 2>&1 \
+    || die "untracked $directory/Dockerfile; commit generated files before creating the publication manifest"
+  [[ -z "$(git status --porcelain --untracked-files=all -- "$directory")" ]] \
+    || die "uncommitted changes in $directory; commit generated files before creating the publication manifest"
 
-      fullAliases=()
-      if [ "$phpVersion" = "php$defaultPhpVersion" ] && [ "$variant" = "$defaultVariant" ]; then
-        fullAliases+=("${versionAliases[@]}")
-        fullAliases+=("${variantAliases[@]}")
-        fullAliases+=("${phpVersionAliases[@]}")
-      fi
-      fullAliases+=("${phpVersionVariantAliases[@]}")
+  # There is one official PHP parent. Development tooling is installed from
+  # verified archives. Reject unsupported dependency structures rather than
+  # silently declaring architectures for an unrecognised image dependency.
+  parent="$(awk '
+    /^[[:space:]]*#/ { next }
+    {
+      line = line $0
+      if (sub(/\\[[:space:]]*$/, " ", line)) next
+      $0 = line
+      line = ""
+      if (toupper($1) == "FROM") { count++; if (NF != 2 || $2 !~ /^php:[A-Za-z0-9_.-]+$/) bad = 1; image = $2 }
+      if (toupper($1) == "COPY" && /--from[=[:space:]]/) bad = 1
+      if (toupper($1) == "RUN" && /--mount=.*from=/) bad = 1
+    }
+    END { if (count != 1 || bad) exit 1; print image }
+  ' "$directory/Dockerfile")" || die "unsupported image dependencies in $directory/Dockerfile"
 
-      variantParents="$(gawk "$gawkParents" "$dir/Dockerfile")"
-      variantArches=
-      for variantParent in $variantParents; do
-        parentArches="${parentRepoToArches[$variantParent]:-}"
-        if [ -z "$parentArches" ]; then
-          continue
-        elif [ -z "$variantArches" ]; then
-          variantArches="$parentArches"
-        else
-          variantArches="$(
-            comm -12 \
-              <(xargs -n1 <<<"$variantArches" | sort -u) \
-              <(xargs -n1 <<<"$parentArches" | sort -u)
-          )"
-        fi
-      done
+  expected_parent="$(jq -r '"php:" + .php + "-" + .variant + (if .series == "4.4" and .variant != "fpm-alpine" then "-bookworm" else "" end)' <<<"$context")"
+  [[ "$parent" == "$expected_parent" ]] || die "$directory/Dockerfile has parent $parent, expected $expected_parent; regenerate it"
+  expected_version="$(jq -r '.version' <<<"$context")"
+  actual_version="$(awk '
+    $1 == "ENV" && $2 == "JOOMLA_VERSION" { print $3 }
+    $1 == "ENV" && $2 ~ /^JOOMLA_VERSION=/ { sub(/^JOOMLA_VERSION=/, "", $2); print $2 }
+  ' "$directory/Dockerfile")"
+  [[ "$actual_version" == "$expected_version" ]] || die "$directory/Dockerfile does not contain Joomla $expected_version; regenerate it"
 
-      echo
-      cat <<-EOE
-				Tags: $(join ', ' "${fullAliases[@]}")
-				Architectures: $(join ', ' $variantArches)
-				GitCommit: $commit
-				Directory: $dir
-			EOE
+  if [[ ! -v "parent_architectures[$parent]" ]]; then
+    architectures="$(bashbrew cat --format '{{ join " " .TagEntry.Architectures }}' \
+      "https://github.com/docker-library/official-images/raw/master/library/$parent")" \
+      || die "could not resolve architectures for $parent"
+    [[ -n "$architectures" && "$architectures" != *$'\n'* ]] || die "missing or ambiguous architecture metadata for $parent"
+    read -r -a architecture_list <<<"$architectures"
+    ((${#architecture_list[@]})) || die "missing or ambiguous architecture metadata for $parent"
+    for architecture in "${architecture_list[@]}"; do
+      case "$architecture" in
+        amd64|arm32v5|arm32v6|arm32v7|arm64v8|i386|ppc64le|riscv64|s390x) ;;
+        *) die "unsupported architecture '$architecture' for $parent" ;;
+      esac
     done
-  done
-done
+    parent_architectures[$parent]="${architecture_list[*]}"
+  fi
+
+  # COPY inputs live in this generated directory, including dev configuration.
+  commit="$(git log -1 --format=%H HEAD -- "$directory")"
+  [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || die "cannot determine the committed build context for $directory"
+  tags="$(jq -r '.tags | join(", ")' <<<"$context")"
+  architectures="$(jq -nr --arg arches "${parent_architectures[$parent]}" '$arches | split(" ") | map(select(length > 0)) | join(", ")')"
+  printf '\nTags: %s\nArchitectures: %s\nGitCommit: %s\nDirectory: %s\n' \
+    "$tags" "$architectures" "$commit" "$directory" >>"$output"
+done < <(jq -c '.[]' <<<"$plan")
+
+cat "$output"

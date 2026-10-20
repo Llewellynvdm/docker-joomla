@@ -1,0 +1,78 @@
+# Validate and normalize the helper or the resolved version file.
+# jq --arg mode helper|resolved -f scripts/validate-config.jq FILE
+
+def require($condition; $message):
+  if $condition then . else error($message) end;
+def version_number: type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$");
+def sha512: type == "string" and test("^[a-fA-F0-9]{128}$");
+def sha256: type == "string" and test("^[a-fA-F0-9]{64}$");
+def package_type: IN("tar.zst", "tar.gz", "tar.bz2");
+
+require(type == "object" and length > 0; "configuration must contain at least one Joomla series")
+| with_entries(
+    .key as $series
+    | require($series | test("^[0-9]+\\.[0-9]+$"); "invalid Joomla series: \($series)")
+    | .value |= (
+        require(type == "object"; "\($series): configuration must be an object")
+        | .packageType = (if .packageType == null then "tar.bz2" else .packageType end)
+        | require(.packageType | package_type; "\($series): unsupported packageType")
+        | require(.phpVersions | type == "object" and length > 0; "\($series): phpVersions must be a nonempty object")
+        | require(.php | type == "string"; "\($series): php must be a string")
+        | require(.phpVersions[.php] != null; "\($series): default PHP must be in phpVersions")
+        | .phpVersions |= with_entries(
+            .key as $php
+            | require($php | test("^[0-9]+\\.[0-9]+$"); "\($series): invalid PHP version \($php)")
+            | .value |= (
+                require(type == "object" and (.pecl | type == "object"); "\($series)/php\($php): missing PECL configuration")
+                | reduce ["imagick", "APCu", "memcached", "redis"][] as $extension (.;
+                    require(.pecl[$extension] | version_number; "\($series)/php\($php): invalid \($extension) version")
+                  )
+              )
+          )
+        | require(.variants | type == "array" and length > 0; "\($series): variants must be a nonempty array")
+        | require(all(.variants[]; IN("apache", "fpm", "fpm-alpine")); "\($series): unsupported runtime variant")
+        | require((.variants | unique | length) == (.variants | length); "\($series): duplicate variants")
+        | require(.variant | type == "string"; "\($series): default variant must be a string")
+        | .variant as $defaultVariant
+        | require(.variants | index($defaultVariant) != null; "\($series): default variant must be in variants")
+        | if .development != null then
+            require(($series | split(".") | map(tonumber)) >= [6,2]; "\($series): development variants require Joomla 6.2 or later")
+            | require(.development | type == "object"; "\($series): development must be an object")
+            | reduce ["composer", "xdebug"][] as $tool (.;
+                require(.development[$tool].version | version_number; "\($series): invalid \($tool) version")
+                | require(.development[$tool].sha256 | sha256; "\($series): missing or invalid \($tool) SHA256")
+              )
+          else del(.development) end
+        | require(.states | type == "object" and length > 0; "\($series): states must be a nonempty object")
+        | .packageType as $packageType
+        | .states |= with_entries(
+            .key as $state
+            | require($state | IN("stable", "alpha", "beta", "rc"); "\($series): unsupported release state \($state)")
+            | .value |= (
+                require(type == "object"; "\($series)/\($state): release must be an object")
+                | require(.version | type == "string"; "\($series)/\($state): version must be a string")
+                | .version as $version
+                | require($version | test("^[0-9]+\\.[0-9]+\\.[0-9]+" + (if $state == "stable" then "" else "-" + $state + "[1-9][0-9]*" end) + "$"); "\($series)/\($state): version does not match release state")
+                | require(($version | split(".") | .[0:2] | join(".")) == $series; "\($series)/\($state): version belongs to another series")
+                | .aliases = (if .aliases == null then [] else .aliases end)
+                | require(.aliases | type == "array"; "\($series)/\($state): aliases must be an array")
+                | require(all(.aliases[]; type == "string" or (type == "number" and floor == .)); "\($series)/\($state): aliases must be strings or integer major versions")
+                | .aliases |= map(tostring)
+                | require(all(.aliases[]; length > 0); "\($series)/\($state): empty alias")
+                | .packageType = (if .packageType == null then $packageType else .packageType end)
+                | require(.packageType | package_type; "\($series)/\($state): unsupported packageType")
+                | if .package != null then
+                    require(.package | type == "string" and test("^https://[^[:space:]]+$"); "\($series)/\($state): package must be an HTTPS URL")
+                    | require(.sha512 | sha512; "\($series)/\($state): an explicit package requires its SHA512")
+                  else . end
+                | if .sha512 != null then
+                    require(.sha512 | sha512; "\($series)/\($state): invalid SHA512")
+                    | .sha512 |= ascii_downcase
+                  else . end
+                | if $mode == "resolved" then
+                    require(.package != null and .sha512 != null; "\($series)/\($state): run ./update.sh to resolve package metadata")
+                  else . end
+              )
+          )
+      )
+  )

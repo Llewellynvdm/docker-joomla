@@ -6,112 +6,106 @@ The full readme is generated over in [docker-library/docs](https://github.com/do
 
 See a change merged here that doesn't show up on the Docker Hub yet? Check [the "library/joomla" manifest file in the docker-library/official-images repo](https://github.com/docker-library/official-images/blob/master/library/joomla), especially [PRs with the "library/joomla" label on that repo](https://github.com/docker-library/official-images/labels/library%2Fjoomla). For more information about the official images process, see the [docker-library/official-images readme](https://github.com/docker-library/official-images/blob/master/README.md).
 
----
-### Build / Manifest Architecture Support
+## Maintaining releases
 
-| Overall Status | Supported Architectures |
-|---|---|
-| [![All arches status](https://doi-janky.infosiftr.net/job/repo-info/job/local/job/joomla/badge/icon)](https://doi-janky.infosiftr.net/job/repo-info/job/local/job/joomla) | ✅ [amd64](https://hub.docker.com/r/amd64/joomla/) • ✅ [riscv64](https://hub.docker.com/r/riscv64/joomla/) • ✅ [arm32v5](https://hub.docker.com/r/arm32v5/joomla/) • ✅ [arm32v6](https://hub.docker.com/r/arm32v6/joomla/) • ✅ [arm32v7](https://hub.docker.com/r/arm32v7/joomla/) • ✅ [arm64v8](https://hub.docker.com/r/arm64v8/joomla/) • ✅ [i386](https://hub.docker.com/r/i386/joomla/) • ✅ [ppc64le](https://hub.docker.com/r/ppc64le/joomla/) • ✅ [s390x](https://hub.docker.com/r/s390x/joomla/) |
+Edit `versions-helper.json`. The existing flow remains:
 
-[See OS/ARCH](https://registry.hub.docker.com/_/joomla/?tab=tags) on official images.
-
---- 
-## How to update the official docker-library/official-images repo
-
-### First update the git repository (basic steps)
-- Fork [this repository](https://github.com/joomla-docker/docker-joomla).
-- Clone your forked repository to your local PC and change to the staging branch.
-```shell
-$ git clone git@github.com:your-name/docker-joomla.git
-$ cd docker-joomla
-$ git checkout staging
-```
-- Open the [versions-helper.json](https://github.com/joomla-docker/docker-joomla/blob/staging/versions-helper.json) file **if this is a version update**.
-- Update the full version number on line [3](https://github.com/joomla-docker/docker-joomla/blob/0dd714aae69dd103e72ae519d4638b71da7c5e4f/versions-helper.json#L3) and [32](https://github.com/joomla-docker/docker-joomla/blob/0dd714aae69dd103e72ae519d4638b71da7c5e4f/versions-helper.json#L32) _(example)_.
-- Run the [update.sh](https://github.com/joomla-docker/docker-joomla/blob/staging/update.sh) script once.
-```shell
-$ sudo chmod +x update.sh
-$ ./update.sh
-```
-- **OR** make what ever changes you think will improve the images
-- Make a commit message with **every change**.
-```shell
-$ git commit -am"Update images of Joomla! x.x.x to x.x.x"
-```
-- Push the changes to your repository.
-```shell
-$ git push origin staging
-```
-- Make a pull request against the staging branch.
-- **Done!**
-
-### Maintainers must then do the following
-- Continue only if all checks are passed with [du-diligence](https://en.wikipedia.org/wiki/Due_diligence) 
-- Merge the pull request into staging
-- Merge the staging branch into the master branch
-- Again continue only if all checks are passed with [du-diligence](https://en.wikipedia.org/wiki/Due_diligence)
-- Clone the master branch of [this repository](https://github.com/joomla-docker/docker-joomla/tree/master) to your PC and change to the master branch.
-```shell
-$ git clone git@github.com:joomla-docker/docker-joomla.git
-$ cd docker-joomla
-$ git checkout master
-```
-- Run the [generate-stackbrew-library.sh](https://github.com/joomla-docker/docker-joomla/blob/staging/generate-stackbrew-library.sh).
-```shell
-$ sudo chmod +x generate-stackbrew-library.sh
-$ ./generate-stackbrew-library.sh
-```
-- This will give an output of all the new values needed in the official images (validate the output)
-- _The easy way to move this output of this file to the official images can be done in the following way._
-- Open the [forked official-images](https://github.com/joomla-docker/official-images) and click on the **Fetch Upstream** button.
-- Then click on **Fetch and Merge** while being in the master branch.
-- Clone the master branch of [this repository](https://github.com/joomla-docker/official-images/tree/master) to your PC.
-```shell
-$ git clone git@github.com:joomla-docker/official-images.git
-$ cd official-images
-$ git checkout master
-```
-- Create a new branch called **joomla**
-```shell
-$ git checkout -b joomla
-```
-- At this point you should have two directories **docker-joomla** and **official-images**
-- **Preferably** in the _same directory_ so you can do the following.
-- Change back to the **docker-joomla** repository.
-```shell
-$ cd ../docker-joomla
-```
-- Run the following command, targeting the Joomla library file in the **official-images** directory with the output:
-```shell
-$ ./generate-stackbrew-library.sh > ../official-images/library/joomla
-```
-- Change again to the **official-images** repository.
-```shell
-$ cd ../official-images
-```
-- Make a commit that will best reflect a summary of the changes.
-```shell
-$ git commit -am"Update Joomla!"
-```
-- Push the changes to up our _**forked official-images**_
-```shell
-$ git push -u origin joomla
+```text
+versions-helper.json -> versions.sh -> versions.json -> apply-templates.sh -> build contexts
 ```
 
-### Official Images About to Update
-- Open a pull request from our _**forked official-images**_ to [official-images](https://github.com/docker-library/official-images).
-- Use the following convention in the message, [check past](https://github.com/docker-library/official-images/pull/10902) to see convention.
-```txt
-Changes:
+`versions.json` is the resolved snapshot containing download URLs and SHA512 checksums. Do not maintain it separately. Each series defines its PHP versions, default PHP and runtime, base variants, and the release states to build. The allowed states are `stable`, `alpha`, `beta`, and `rc`; a series does not need a stable release.
 
-- joomla-docker/docker-joomla@54a82e4: Update images of Joomla! 4.0.2 to 4.0.3
-- joomla-docker/docker-joomla@f87bc00: Update version of Joomla! 4.0.2 to 4.0.3
-- joomla-docker/docker-joomla@f36a82a: Update images of Joomla! 3.10.1 to 3.10.2
-- joomla-docker/docker-joomla@4bc3c7b: Update version of Joomla! 3.10.1 to 3.10.2
+For example, the `states` member inside the `6.2` configuration could contain:
+
+```json
+"states": {
+  "stable": { "version": "6.2.0", "aliases": ["6.2", "6", "latest"] },
+  "rc": { "version": "6.2.1-rc1", "aliases": ["6.2-rc"] }
+}
 ```
-- Basically denoting each commit to [our master branch](https://github.com/joomla-docker/docker-joomla/tree/master) since the last update to the official images.
-- Once this is done, the maintainers of the [official Docker images](https://github.com/docker-library/official-images) takes over.
-- Should there be any issue which you can't resolve, reach out to the [other maintainers](https://github.com/joomla-docker/docker-joomla/graphs/contributors).
-- Done!
 
-> The [current maintainers](https://github.com/joomla-docker/docker-joomla/blob/master/maintainers.json) of the official images. Let us know if you have any questions.
+A separate `6.3` configuration can contain only `alpha`, with version `6.3.0-alpha1`. These numbers illustrate the schema; configure releases that Joomla has actually published. Each series/state selects one release tip. Change its full version to advance it, or add another state to build both simultaneously. The version must match its series and state, including the lowercase numbered suffix for prereleases.
+
+The generator creates these paths for every configured PHP version and base variant:
+
+```text
+6.2/stable/php8.4/apache/
+6.2/stable/php8.4/apache-dev/
+6.2/rc/php8.4/fpm-alpine/
+6.2/rc/php8.4/fpm-alpine-dev/
+6.3/alpha/php8.4/fpm/
+6.3/alpha/php8.4/fpm-dev/
+```
+
+Set `development` for a series to generate the corresponding `-dev` variants for **all its configured states**. The helper pins Composer and Xdebug versions and SHA256 checksums; see the existing `6.2` configuration. Development variants are supported for Joomla 6.2 and later. Keep `variants` as the base names `apache`, `fpm`, and `fpm-alpine`; the generator derives `apache-dev`, `fpm-dev`, and `fpm-alpine-dev`. See [development image usage](development/README.md) for Composer, IDE setup, Xdebug triggers, and coverage.
+
+Removing a series or state from the helper removes it from the active build/tag plan. The scripts never delete folders. Remove obsolete directories manually when desired; inactive directories are ignored by CI and manifest generation.
+
+## Tags and aliases
+
+The exact release version is always included. `aliases` adds explicitly named release aliases; an empty array or an omitted `aliases` field is valid. Include the minor alias explicitly, such as `"6.2"`; it is not inferred from the directory name. Prerelease aliases must retain their state, such as `6.2-rc`, `6-rc`, or `rc`, and cannot claim stable aliases or `latest`.
+
+Every release name receives a `-phpX.Y-variant` tag. The configured default PHP **and** default runtime also receive the shorter version, version-runtime, and version-PHP tags, preserving the existing default-selection rules. The special alias `latest` supplies the unversioned aliases. Its owner must be a stable release, and collisions across the complete expanded tag set cause generation to fail before metadata is changed.
+
+For a `6.2.0` stable release that owns `latest`, with default PHP 8.4 and Apache:
+
+| Regular tag | Development tag |
+| --- | --- |
+| `joomla:latest` | `joomla:dev` |
+| `joomla:6.2.0` | `joomla:6.2.0-dev` |
+| `joomla:6.2.0-php8.4` | `joomla:6.2.0-php8.4-dev` |
+| `joomla:6.2.0-php8.4-apache` | `joomla:6.2.0-php8.4-apache-dev` |
+| `joomla:php8.3-apache` | `joomla:php8.3-apache-dev` |
+| `joomla:6.2.0-php8.4-fpm-alpine` | `joomla:6.2.0-php8.4-fpm-alpine-dev` |
+
+Prerelease tags use the same rules: for example, `6.2.1-rc1-php8.4-apache-dev`. Stable tags do not contain `-stable`. The `dev` alias is the development counterpart of `latest`; `latest-dev` is not generated.
+
+## Regenerating files
+
+The scripts require Bash, GNU coreutils, GNU awk, jq, curl, and Git. From your working branch, run:
+
+```sh
+./update.sh
+```
+
+This validates the complete configuration and tag namespace, resolves published Joomla package metadata, updates `versions.json`, and creates or updates every active build context. A matching resolved release is reused from `versions.json`; changing only aliases, PHP settings, or tool pins still regenerates the files. Use force to fetch and verify packages again:
+
+```sh
+./update.sh --force
+```
+
+Optional selectors restrict package refresh and template generation:
+
+```sh
+./update.sh 6.2
+./update.sh --force 6.2/rc
+```
+
+Unselected releases must already have matching resolved metadata. After a broad configuration change, run without selectors. `./apply-templates.sh` regenerates from the resolved snapshot without fetching Joomla metadata; it accepts the same series or series/state selectors.
+
+The series `packageType` is inherited by its states and can be overridden per state. The resolver requires an exact published full-package asset and verifies the GitHub release asset digest before recording its SHA512. If upstream lacks that digest, supply a verified `sha512` in the helper. A custom HTTPS `package` URL always requires its corresponding `sha512`.
+
+Review `versions.json` and all generated files, build/test the affected images, and commit them with the source changes. Use `git add` so newly created directories are included; `git commit -am` alone misses them. On the initial migration from the old layout, all active paths change to include the state directory.
+
+CI runs generator fixtures, checks deterministic rendering, builds every active context on the hosted runner, and runs the Docker Official Images tests plus Joomla runtime checks. Development image checks exercise Composer as `www-data`, Xdebug modes, and real triggered CLI and Apache/FPM debugging sessions. CI does not publish images. The source-only migration can retain a legacy `versions.json` while CI builds freshly generated contexts; once the snapshot uses `states`, CI also requires active generated outputs to match the committed files. Generated outputs must be committed before submitting an Official Images manifest.
+
+## Preparing the Official Images manifest
+
+After the generated contexts are committed and the branch is pushed, install [bashbrew](https://github.com/docker-library/bashbrew) and run:
+
+```sh
+./generate-stackbrew-library.sh > ../official-images/library/joomla
+```
+
+The manifest uses the same tag plan as templating and CI, includes only configured states, and derives architectures from each PHP parent. It refuses missing, untracked, or modified build contexts. Every `GitCommit` refers to committed files; generating a manifest does not publish images.
+
+The default `GitRepo` remains the upstream Joomla image repository. To review a manifest against a pushed fork branch, set both overrides explicitly:
+
+```sh
+STACKBREW_GIT_REPO=https://github.com/Llewellynvdm/docker-joomla.git \
+STACKBREW_GIT_FETCH=refs/heads/feature/prerelease-dev-images \
+  ./generate-stackbrew-library.sh > ../official-images/library/joomla
+```
+
+Review the tags, directories, commits, and architectures before opening the `docker-library/official-images` pull request. Its review and architecture builds remain required for publication. User-facing changes also belong in [docker-library/docs/joomla](https://github.com/docker-library/docs/tree/master/joomla).
