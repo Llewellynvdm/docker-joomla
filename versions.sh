@@ -41,7 +41,8 @@ selected() {
     local release="$1" target
     [ "${#targets[@]}" -gt 0 ] || return 0
     for target in "${targets[@]}"; do
-        if [ "$target" = "$release" ] || [ "$target" = "${release%%/*}" ]; then return 0; fi
+        # Accept either a complete track or a series shared by selected tracks.
+        if [ "$target" = "$release" ] || [ "$target" = "${release%%/*}" ] || [ "${target%%/*}" = "$release" ]; then return 0; fi
     done
     return 1
 }
@@ -68,8 +69,8 @@ for release in "${releases[@]}"; do
         rc) label=Release_Candidate ;;
     esac
     asset="Joomla_${version}-${label}-Full_Package.${packageType}"
-    package="$(jq -r --arg default "https://github.com/joomla/joomla-cms/releases/download/$version/$asset" '.package // $default' <<< "$metadata")"
-    expected="$(jq -r '.sha512 // empty' <<< "$metadata")"
+    officialPackage="https://github.com/joomla/joomla-cms/releases/download/$version/$asset"
+    package="$(jq -r --arg default "$officialPackage" '.package // $default' <<< "$metadata")"
     cached='{}'
     if [ -f versions.json ]; then
         cached="$(jq -c --arg series "$series" --arg state "$state" '
@@ -79,10 +80,9 @@ for release in "${releases[@]}"; do
         ' versions.json)"
     fi
     validCache=false
-    if jq -e --arg version "$version" --arg package "$package" --arg type "$packageType" --arg expected "$expected" '
+    if jq -e --arg version "$version" --arg package "$package" --arg type "$packageType" '
         .version == $version and .package == $package and .packageType == $type
         and (.sha512 | type == "string" and test("^[a-fA-F0-9]{128}$"))
-        and ($expected == "" or (.sha512 | ascii_downcase) == $expected)
     ' <<< "$cached" > /dev/null; then validCache=true; fi
 
     if $validCache && { ! $force || ! selected "$release"; }; then
@@ -94,25 +94,25 @@ for release in "${releases[@]}"; do
             exit 1
         fi
         echo "Resolving Joomla $version ($release)" >&2
-        if [ -z "$expected" ]; then
+        digest=
+        if [ "$package" = "$officialPackage" ]; then
             # Resolve an exact published full-package asset. GitHub's prerelease
             # flag alone is not a reliable indication of Joomla's release state.
             headers=(-H 'Accept: application/vnd.github+json')
             token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
             if [ -n "$token" ]; then headers+=(-H "Authorization: Bearer $token"); fi
             fetch "${headers[@]}" "https://api.github.com/repos/joomla/joomla-cms/releases/tags/$version" -o "$work/release.json"
-            digest="$(jq -er --arg version "$version" --arg asset "$asset" --arg package "$package" '
+            digest="$(jq -r --arg version "$version" --arg asset "$asset" --arg package "$package" '
                 if .tag_name != $version or .draft != false then error("unexpected or draft release") else . end |
                 [.assets[] | select(.name == $asset and .browser_download_url == $package)] |
                 if length != 1 then error("expected exactly one matching full-package asset") else .[0].digest end |
-                if type == "string" and test("^sha256:[a-fA-F0-9]{64}$") then ltrimstr("sha256:")
-                else error("missing published SHA256; provide a verified sha512 in the helper") end
+                if . == null then ""
+                elif type == "string" and test("^sha256:[a-fA-F0-9]{64}$") then ltrimstr("sha256:")
+                else error("invalid published SHA256") end
             ' "$work/release.json")"
         fi
         fetch "$package" -o "$work/package"
-        if [ -n "$expected" ]; then
-            printf '%s  %s\n' "$expected" "$work/package" | sha512sum --check --status
-        else
+        if [ -n "$digest" ]; then
             printf '%s  %s\n' "$digest" "$work/package" | sha256sum --check --status
         fi
         sha512="$(sha512sum "$work/package")"
@@ -123,6 +123,58 @@ for release in "${releases[@]}"; do
         .[$series].states[$state] += {package: $package, sha512: $sha512}
     ' "$work/result.json" > "$work/next.json"
     mv "$work/next.json" "$work/result.json"
+done
+
+# Development tools belong to the series, so a state selector refreshes its
+# shared tools too. Process selected series first to share a forced download.
+selectedSeries=()
+otherSeries=()
+while IFS= read -r series; do
+    if selected "$series"; then selectedSeries+=("$series"); else otherSeries+=("$series"); fi
+done < <(jq -r 'to_entries[] | select(.value.development != null) | .key' "$work/helper.json")
+declare -A toolHashes=()
+for series in "${selectedSeries[@]}" "${otherSeries[@]}"; do
+    for tool in composer xdebug; do
+        version="$(jq -r --arg series "$series" --arg tool "$tool" '.[$series].development[$tool].version' "$work/helper.json")"
+        key="$tool:$version"
+        if [[ ! -v "toolHashes[$key]" ]]; then
+            cached=
+            if [ -f versions.json ]; then
+                cached="$(jq -r --arg tool "$tool" --arg version "$version" '
+                    [.[] | .development[$tool] | select(.version == $version)
+                        | .sha256 | select(type == "string" and test("^[a-fA-F0-9]{64}$"))][0] // ""
+                ' versions.json)"
+            fi
+            if [ -n "$cached" ] && { ! $force || ! selected "$series"; }; then
+                toolHashes[$key]="${cached,,}"
+            else
+                if ! selected "$series"; then
+                    echo "Unresolved or changed $tool $version for $series; include it or run ./update.sh without selectors." >&2
+                    exit 1
+                fi
+                echo "Resolving $tool $version ($series)" >&2
+                case "$tool" in
+                    composer) package="https://getcomposer.org/download/$version/composer.phar" ;;
+                    xdebug) package="https://xdebug.org/files/xdebug-$version.tgz" ;;
+                esac
+                fetch "$package" -o "$work/tool"
+                checksum="$(sha256sum "$work/tool")"
+                toolHashes[$key]="${checksum%% *}"
+                if [ "$tool" = composer ]; then
+                    fetch "$package.sha256sum" -o "$work/tool.sha256sum"
+                    read -r expected filename < "$work/tool.sha256sum" || true
+                    [[ "$expected" =~ ^[a-fA-F0-9]{64}$ && "$filename" = composer.phar ]] \
+                        || { echo 'Invalid published Composer SHA256' >&2; exit 1; }
+                    printf '%s  %s\n' "$expected" "$work/tool" | sha256sum --check --status
+                fi
+                rm -f "$work/tool"
+            fi
+        fi
+        jq --arg series "$series" --arg tool "$tool" --arg sha256 "${toolHashes[$key]}" '
+            .[$series].development[$tool].sha256 = $sha256
+        ' "$work/result.json" > "$work/next.json"
+        mv "$work/next.json" "$work/result.json"
+    done
 done
 
 jq --arg mode resolved -S -f scripts/validate-config.jq "$work/result.json" > "$work/versions.json"

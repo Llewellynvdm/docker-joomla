@@ -15,8 +15,16 @@ jq --slurpfile helper "$repo/versions-helper.json" --arg fixture synthetic \
     -f "$repo/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repo/versions.json}" \
     | jq '.["100.0"]' > "$work/settings.json"
 check() {
-    jq '{"100.0": .}' "$1" | jq --arg mode helper -f "$repo/scripts/validate-config.jq" >/dev/null
+    jq '{"100.0": .}' "$1" | jq --arg mode "${2:-resolved}" -f "$repo/scripts/validate-config.jq" >/dev/null
 }
+# Humans provide settings and versions, including custom package URLs. Hashes
+# are generated into the resolved snapshot and must never be required here.
+jq 'walk(if type == "object" then del(.sha256, .sha512) else . end)' \
+    "$work/settings.json" > "$work/helper.json"
+check "$work/helper.json" helper
+if check "$work/settings.json" helper >"$work/log" 2>&1; then
+    echo 'FAIL: helper accepted generated checksums' >&2; exit 1
+fi
 reject() {
     jq "$1" "$work/settings.json" > "$work/invalid.json"
     if check "$work/invalid.json" >"$work/log" 2>&1; then

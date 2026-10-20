@@ -5,6 +5,11 @@ with_entries(
   .key as $series | .value as $old
   | if .value.states != null then . else
       .value = ($helper[0][$series]
+        # Legacy snapshots did not record tool hashes. Rendering fixtures use
+        # dummy hashes; resolver tests exercise the real checksum generation.
+        | if .development != null then
+            .development |= map_values(. + {sha256: ("0" * 64)})
+          else . end
         | .php = $old.php | .variant = $old.variant | .variants = $old.variants
         | .phpVersions |= with_entries(select(.key as $php | $old.phpVersions | index($php)))
         | .states = {stable: ($old | {

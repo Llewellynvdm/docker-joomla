@@ -46,12 +46,10 @@
     },
     "development": {
       "composer": {
-        "version": "2.10.3",
-        "sha256": "7a2d379d5b8ffdaa028580ef26494c36d2feef4b178d3dd1473a4dbc5e17c8d6"
+        "version": "2.10.3"
       },
       "xdebug": {
-        "version": "3.5.3",
-        "sha256": "f073de91bea046106abf4d6071c963ea71e58571df6ce58948ceca89d121cb2d"
+        "version": "3.5.3"
       }
     }
   },
