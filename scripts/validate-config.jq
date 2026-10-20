@@ -42,7 +42,7 @@ require(type == "object" and length > 0; "configuration must contain at least on
         | if .development != null then
             require(($series | split(".") | map(tonumber)) >= [6,2]; "\($series): development variants require Joomla 6.2 or later")
             | require(.development | type == "object"; "\($series): development must be an object")
-            | reduce ["composer", "xdebug"][] as $tool (.;
+            | reduce ["composer", "xdebug", "npm"][] as $tool (.;
                 require(.development[$tool].version | version_number; "\($series): invalid \($tool) version")
                 | if $mode == "resolved" then
                     require(.development[$tool].sha256 | sha256; "\($series): missing or invalid \($tool) SHA256")

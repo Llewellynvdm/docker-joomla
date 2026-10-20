@@ -240,15 +240,25 @@ RUN set -eux; \
 ENV COMPOSER_VERSION={{ env.composerVersion }} \
 	COMPOSER_SHA256={{ env.composerSha256 }} \
 	XDEBUG_VERSION={{ env.xdebugVersion }} \
-	XDEBUG_SHA256={{ env.xdebugSha256 }}
+	XDEBUG_SHA256={{ env.xdebugSha256 }} \
+	NPM_VERSION={{ env.npmVersion }} \
+	NPM_SHA256={{ env.npmSha256 }}
 
 RUN set -eux; \
 {{ if is_alpine then ( -}}
-	apk add --no-cache git openssh-client patch unzip zip zlib; \
+	apk add --no-cache \
+		git openssh-client patch unzip zip zlib \
+		nodejs python3 make g++ \
+		mariadb-client postgresql-client sqlite \
+		jq rsync less nano; \
 	apk add --no-cache --virtual .xdebug-build-deps $PHPIZE_DEPS linux-headers zlib-dev; \
 {{ ) else ( -}}
 	apt-get update; \
-	apt-get install -y --no-install-recommends git openssh-client patch unzip zip; \
+	apt-get install -y --no-install-recommends \
+		git openssh-client patch unzip zip \
+		nodejs python3 make g++ \
+		default-mysql-client postgresql-client sqlite3 \
+		jq rsync less nano; \
 	savedAptMark="$(apt-mark showmanual)"; \
 	apt-get install -y --no-install-recommends $PHPIZE_DEPS zlib1g-dev; \
 {{ ) end -}}
@@ -256,6 +266,17 @@ RUN set -eux; \
 		"https://getcomposer.org/download/$COMPOSER_VERSION/composer.phar" -o /usr/local/bin/composer; \
 	echo "$COMPOSER_SHA256  /usr/local/bin/composer" | sha256sum -c -; \
 	chmod 0755 /usr/local/bin/composer; \
+# Use the distribution's native Node.js on every PHP architecture. npm is
+# pinned separately because distribution npm versions can lag Joomla's needs.
+	curl --fail --show-error --location --retry 3 \
+		"https://registry.npmjs.org/npm/-/npm-$NPM_VERSION.tgz" -o /tmp/npm.tgz; \
+	echo "$NPM_SHA256  /tmp/npm.tgz" | sha256sum -c -; \
+	mkdir -p /usr/local/lib/node_modules/npm; \
+	tar -xzf /tmp/npm.tgz -C /usr/local/lib/node_modules/npm --strip-components=1 --no-same-owner; \
+	rm /tmp/npm.tgz; \
+	ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm; \
+	ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx; \
+	node -e 'const npm = require("/usr/local/lib/node_modules/npm/package.json"); const semver = require("/usr/local/lib/node_modules/npm/node_modules/semver"); if (!semver.satisfies(process.version, npm.engines.node)) { throw new Error("Node.js " + process.version + " does not satisfy npm: " + npm.engines.node); }'; \
 	curl --fail --show-error --location --retry 3 \
 		"https://xdebug.org/files/xdebug-$XDEBUG_VERSION.tgz" -o /tmp/xdebug.tgz; \
 	echo "$XDEBUG_SHA256  /tmp/xdebug.tgz" | sha256sum -c -; \
@@ -285,7 +306,10 @@ RUN set -eux; \
 	rm -rf /var/lib/apt/lists/*; \
 {{ ) end -}}
 	php -r 'exit(phpversion("xdebug") === getenv("XDEBUG_VERSION") ? 0 : 1);'; \
-	composer --version --no-ansi
+	composer --version --no-ansi; \
+	node --version; \
+	test "$(npm --version)" = "$NPM_VERSION"; \
+	npx --version
 
 # Xdebug connects out to the IDE; it does not listen on a container port.
 ENV JOOMLA_XDEBUG_CLIENT_HOST=host.docker.internal \

@@ -56,6 +56,24 @@ docker run --rm --user www-data -e COMPOSER_HOME=/tmp/composer-home "$image" sh 
   touch "$cache/write-test"
   rm "$cache/write-test"
 '
+# Run a local npm project as the web user, with no registry or host tools needed.
+docker run --rm --user www-data -e npm_config_cache=/tmp/npm-cache "$image" sh -ec '
+  for tool in git ssh patch zip unzip node npm npx python3 make g++ mariadb psql sqlite3 jq rsync less nano; do
+    command -v "$tool" >/dev/null
+  done
+  test "$(npm --version)" = "$NPM_VERSION"
+  test "$(npx --version)" = "$NPM_VERSION"
+  project=$(mktemp -d)
+  mkdir -p "$npm_config_cache"
+  cd "$project"
+  node -e '\''require("node:fs").writeFileSync("package.json", JSON.stringify({name:"joomla-dev-check",version:"1.0.0",private:true,scripts:{build:"node build.js"}}))'\''
+  printf "%s\n" '\''require("node:fs").writeFileSync("built.js", "console.log(123)")'\'' >build.js
+  npm install --package-lock-only --ignore-scripts --offline --no-audit --no-fund
+  npm ci --offline --no-audit --no-fund
+  npm run build
+  test "$(node built.js)" = 123
+  test -w "$npm_config_cache"
+'
 
 # A real DBGp exchange verifies connectivity, rather than only extension loading.
 cat >"$tmp/debug-client.php" <<'PHP'

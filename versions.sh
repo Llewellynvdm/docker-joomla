@@ -134,7 +134,7 @@ while IFS= read -r series; do
 done < <(jq -r 'to_entries[] | select(.value.development != null) | .key' "$work/helper.json")
 declare -A toolHashes=()
 for series in "${selectedSeries[@]}" "${otherSeries[@]}"; do
-    for tool in composer xdebug; do
+    for tool in composer xdebug npm; do
         version="$(jq -r --arg series "$series" --arg tool "$tool" '.[$series].development[$tool].version' "$work/helper.json")"
         key="$tool:$version"
         if [[ ! -v "toolHashes[$key]" ]]; then
@@ -156,6 +156,7 @@ for series in "${selectedSeries[@]}" "${otherSeries[@]}"; do
                 case "$tool" in
                     composer) package="https://getcomposer.org/download/$version/composer.phar" ;;
                     xdebug) package="https://xdebug.org/files/xdebug-$version.tgz" ;;
+                    npm) package="https://registry.npmjs.org/npm/-/npm-$version.tgz" ;;
                 esac
                 fetch "$package" -o "$work/tool"
                 checksum="$(sha256sum "$work/tool")"

@@ -48,7 +48,10 @@ reject '.packageType = "zip"'
 reject '.packageType = false'
 reject '.states.stable.packageType = false'
 reject '.phpVersions[.php].pecl.redis = "latest"'
-reject '.development.xdebug.sha256 = "invalid"'
+for tool in composer xdebug npm; do
+    reject ".development.$tool.sha256 = \"invalid\""
+    reject ".development.$tool.version = \"latest\""
+done
 reject '.states = {}'
 for change in '.states.stable.aliases = []' '.states.stable.aliases = null' 'del(.states.stable.aliases)' 'del(.states.stable)'; do
     jq "$change" "$work/settings.json" > "$work/valid.json"

@@ -65,7 +65,7 @@ check_contexts() {
       excludes "$dockerfile" 'docker-php-ext-enable opcache'
     fi
     if [[ "$dev" == true ]]; then
-      for tool in composer xdebug; do
+      for tool in composer xdebug npm; do
         for property in version sha256; do
           value="$(jq -r --arg series "$series" --arg tool "$tool" --arg property "$property" '.[$series].development[$tool][$property]' versions.json)"
           contains "$dockerfile" "${tool^^}_${property^^}=$value"
@@ -80,6 +80,7 @@ check_contexts() {
       cmp development/zz-joomla-development.ini "$directory/zz-joomla-development.ini"
     else
       excludes "$dockerfile" 'COMPOSER_VERSION='
+      excludes "$dockerfile" 'NPM_VERSION='
       excludes "$dockerfile" 'xdebug'
       [[ ! -e "$directory/zz-xdebug-settings.ini" ]] || fail 'normal image received development config'
     fi

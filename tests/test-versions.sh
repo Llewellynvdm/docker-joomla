@@ -34,6 +34,7 @@ done
 printf '%s\n' "$url" >> "$FIXTURE_CALLS"
 [[ "${FIXTURE_FAILURE:-}" != http ]] || exit 22
 if [[ "${FIXTURE_FAILURE:-}" == tool && "$url" != https://*github.com/* ]]; then exit 22; fi
+if [[ "${FIXTURE_FAILURE:-}" == npm && "$url" == https://registry.npmjs.org/* ]]; then exit 22; fi
 if [[ "$url" == https://api.github.com/* ]]; then
     version="${url##*/}"
     case "$version" in
@@ -82,7 +83,7 @@ rm .versions-helper.json versions.json
 fixture synthetic | helper_settings | jq 'map_values(.states |= map_values(del(.package)))' > versions-helper.json
 cp versions-helper.json "$work/original-helper.json"
 series="$(jq -r 'to_entries[] | select(.value.states.rc != null) | .key' versions-helper.json)"
-# Composer fetches its archive and published checksum; Xdebug fetches its archive.
+# Composer fetches its archive and checksum; the other tools fetch their archives.
 tool_calls="$(jq '[.[] | .development | to_entries[] | [.key, .value.version]] | unique | map(if .[0] == "composer" then 2 else 1 end) | add' versions-helper.json)"
 expected_calls="$(jq '[.[] | .states | length] | add * 2' versions-helper.json)"
 expected_calls=$((expected_calls + tool_calls))
@@ -102,7 +103,7 @@ reject() {
     if "$@" > "$work/log" 2>&1; then echo "FAIL: unexpectedly succeeded: $*" >&2; exit 1; fi
     cmp versions.json "$work/baseline.json"
 }
-for failure in http missing duplicate digest checksum tool composer-digest composer-checksum; do
+for failure in http missing duplicate digest checksum tool npm composer-digest composer-checksum; do
     reject env FIXTURE_FAILURE="$failure" ./versions.sh --force
 done
 FIXTURE_FAILURE=no-digest ./versions.sh --force "$series/rc"
@@ -115,16 +116,20 @@ reject ./versions.sh "$series/stable"
 jq -e --arg series "$series" --slurpfile helper versions-helper.json \
     '.[$series].states.rc.version == $helper[0][$series].states.rc.version' versions.json >/dev/null
 
-# Updating one tool version regenerates its hash; an unselected change is rejected.
-cp versions.json "$work/baseline.json"
-edit_helper '.[$series].development.xdebug.version |= (split(".") | map(tonumber) | .[2] += 1 | map(tostring) | join("."))'
+# Updating a tool regenerates only its hash; an unselected change is rejected.
 other="$(jq -r --arg series "$series" 'keys[] | select(. != $series)' versions-helper.json)"
-reject ./versions.sh "$other"
-before="$(wc -l < "$FIXTURE_CALLS")"
-./versions.sh "$series/rc"
-[[ "$(wc -l < "$FIXTURE_CALLS")" == "$((before + 1))" ]]
-jq -e --arg series "$series" --arg sha "$FIXTURE_SHA256" --slurpfile helper versions-helper.json \
-    '.[$series].development.xdebug == ($helper[0][$series].development.xdebug + {sha256:$sha})' versions.json >/dev/null
+while IFS= read -r tool; do
+    cp versions.json "$work/baseline.json"
+    edit_helper --arg tool "$tool" '.[$series].development[$tool].version |= (split(".") | map(tonumber) | .[2] += 1 | map(tostring) | join("."))'
+    reject ./versions.sh "$other"
+    before="$(wc -l < "$FIXTURE_CALLS")"
+    ./versions.sh "$series/rc"
+    calls=1
+    if [[ "$tool" == composer ]]; then calls=2; fi
+    [[ "$(wc -l < "$FIXTURE_CALLS")" == "$((before + calls))" ]]
+    jq -e --arg series "$series" --arg tool "$tool" --arg sha "$FIXTURE_SHA256" --slurpfile helper versions-helper.json \
+        '.[$series].development[$tool] == ($helper[0][$series].development[$tool] + {sha256:$sha})' versions.json >/dev/null
+done < <(jq -r --arg series "$series" '.[$series].development | keys[]' versions-helper.json)
 
 retired="$(jq -r --arg series "$series" '"\($series)/alpha/php\(.[$series].php)/\(.[$series].variant)"' versions-helper.json)"
 mkdir -p "$retired"

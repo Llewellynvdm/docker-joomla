@@ -26,7 +26,8 @@ with_entries(
       | .packageType = "tar.zst"
       | .development = {
           composer: {version: "100.0.0", sha256: ("0" * 64)},
-          xdebug: {version: "100.0.0", sha256: ("0" * 64)}
+          xdebug: {version: "100.0.0", sha256: ("0" * 64)},
+          npm: {version: "100.0.0", sha256: ("0" * 64)}
         }
       | .states = {
           stable: {version: "100.0.0", aliases: ["100.0", "100", "latest"]},
