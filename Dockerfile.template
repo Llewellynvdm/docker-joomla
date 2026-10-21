@@ -239,6 +239,8 @@ RUN set -eux; \
 # Development tools are installed only in the matching -dev variant.
 ENV COMPOSER_VERSION={{ env.composerVersion }} \
 	COMPOSER_SHA256={{ env.composerSha256 }} \
+	PIE_VERSION={{ env.pieVersion }} \
+	PIE_SHA256={{ env.pieSha256 }} \
 	XDEBUG_VERSION={{ env.xdebugVersion }} \
 	XDEBUG_SHA256={{ env.xdebugSha256 }} \
 	XDEBUG_PACKAGE={{ env.xdebugPackage }} \
@@ -252,7 +254,7 @@ RUN set -eux; \
 		nodejs python3 make g++ \
 		mariadb-client postgresql-client sqlite \
 		jq rsync less nano; \
-	apk add --no-cache --virtual .xdebug-build-deps $PHPIZE_DEPS linux-headers zlib-dev; \
+	apk add --no-cache --virtual .xdebug-build-deps $PHPIZE_DEPS automake libtool linux-headers zlib-dev; \
 {{ ) else ( -}}
 	apt-get update; \
 	apt-get install -y --no-install-recommends \
@@ -261,12 +263,17 @@ RUN set -eux; \
 		default-mysql-client postgresql-client sqlite3 \
 		jq rsync less nano; \
 	savedAptMark="$(apt-mark showmanual)"; \
-	apt-get install -y --no-install-recommends $PHPIZE_DEPS zlib1g-dev; \
+	apt-get install -y --no-install-recommends $PHPIZE_DEPS automake libtool zlib1g-dev; \
 {{ ) end -}}
 	curl --fail --show-error --location --retry 3 \
 		"https://getcomposer.org/download/$COMPOSER_VERSION/composer.phar" -o /usr/local/bin/composer; \
 	echo "$COMPOSER_SHA256  /usr/local/bin/composer" | sha256sum -c -; \
 	chmod 0755 /usr/local/bin/composer; \
+	curl --fail --show-error --location --retry 3 --retry-all-errors \
+		--connect-timeout 15 --max-time 300 --proto '=https' --proto-redir '=https' \
+		"https://github.com/php/pie/releases/download/$PIE_VERSION/pie.phar" -o /usr/local/bin/pie; \
+	echo "$PIE_SHA256  /usr/local/bin/pie" | sha256sum -c -; \
+	chmod 0755 /usr/local/bin/pie; \
 # Use the distribution's native Node.js on every PHP architecture. npm is
 # pinned separately because distribution npm versions can lag Joomla's needs.
 	curl --fail --show-error --location --retry 3 \
@@ -278,19 +285,18 @@ RUN set -eux; \
 	ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm; \
 	ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx; \
 	node -e 'const npm = require("/usr/local/lib/node_modules/npm/package.json"); const semver = require("/usr/local/lib/node_modules/npm/node_modules/semver"); if (!semver.satisfies(process.version, npm.engines.node)) { throw new Error("Node.js " + process.version + " does not satisfy npm: " + npm.engines.node); }'; \
-	curl --fail --show-error --location --retry 3 \
+	curl --fail --show-error --location --retry 3 --retry-all-errors \
+		--connect-timeout 15 --max-time 300 --proto '=https' --proto-redir '=https' \
 		"$XDEBUG_PACKAGE" -o /tmp/xdebug.tgz; \
 	echo "$XDEBUG_SHA256  /tmp/xdebug.tgz" | sha256sum -c -; \
 	mkdir /tmp/xdebug; \
-	tar -xzf /tmp/xdebug.tgz -C /tmp/xdebug --strip-components=1; \
-	cd /tmp/xdebug; \
-	phpize; \
-	./configure --enable-xdebug; \
-	make -j "$(nproc)"; \
-	make install; \
+	tar -xzf /tmp/xdebug.tgz -C /tmp/xdebug --strip-components=1 --no-same-owner; \
+# PIE installs the verified local source, so the build uses exactly the archive
+# resolved by versions.sh. Enable it once, after OPcache, using PHP's helper.
+	PIE_WORKING_DIRECTORY=/tmp/joomla-pie pie install --no-interaction --no-cache \
+		--working-dir=/tmp/xdebug --skip-enable-extension --make-parallel-jobs="$(nproc)"; \
 	docker-php-ext-enable --ini-name zz-xdebug.ini xdebug; \
-	cd /; \
-	rm -rf /tmp/xdebug /tmp/xdebug.tgz; \
+	rm -rf /tmp/xdebug /tmp/xdebug.tgz /tmp/joomla-pie; \
 {{ if is_alpine then ( -}}
 	apk del --no-network .xdebug-build-deps; \
 {{ ) else ( -}}
@@ -308,6 +314,7 @@ RUN set -eux; \
 {{ ) end -}}
 	php -r 'exit(phpversion("xdebug") === getenv("XDEBUG_VERSION") ? 0 : 1);'; \
 	composer --version --no-ansi; \
+	pie --version --no-ansi; \
 	node --version; \
 	test "$(npm --version)" = "$NPM_VERSION"; \
 	npx --version

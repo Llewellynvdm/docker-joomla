@@ -69,7 +69,7 @@ check_contexts() {
       excludes "$dockerfile" 'docker-php-ext-enable opcache'
     fi
     if [[ "$dev" == true ]]; then
-      for tool in composer xdebug npm; do
+      for tool in composer pie xdebug npm; do
         for property in version sha256; do
           value="$(jq -r --arg series "$series" --arg tool "$tool" --arg property "$property" '.[$series].development[$tool][$property]' versions.json)"
           contains "$dockerfile" "${tool^^}_${property^^}=$value"
@@ -81,6 +81,8 @@ check_contexts() {
       contains "$dockerfile" '"$XDEBUG_PACKAGE" -o /tmp/xdebug.tgz'
       excludes "$dockerfile" 'https://xdebug.org/files/'
       contains "$dockerfile" 'docker-php-ext-enable --ini-name zz-xdebug.ini xdebug'
+      contains "$dockerfile" 'pie install --no-interaction --no-cache'
+      contains "$dockerfile" '--working-dir=/tmp/xdebug --skip-enable-extension'
       contains "$dockerfile" 'JOOMLA_XDEBUG_CLIENT_HOST=host.docker.internal'
       contains "$dockerfile" 'JOOMLA_XDEBUG_CLIENT_PORT=9003'
       excludes "$dockerfile" 'XDEBUG_CONFIG'
@@ -89,6 +91,7 @@ check_contexts() {
       cmp development/zz-joomla-development.ini "$directory/zz-joomla-development.ini"
     else
       excludes "$dockerfile" 'COMPOSER_VERSION='
+      excludes "$dockerfile" 'PIE_VERSION='
       excludes "$dockerfile" 'NPM_VERSION='
       excludes "$dockerfile" 'xdebug'
       [[ ! -e "$directory/zz-xdebug-settings.ini" ]] || fail "$directory received development config"

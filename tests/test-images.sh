@@ -39,7 +39,7 @@ if (!is_file("/usr/src/joomla/cli/joomla.php")) { exit(1); }
 if [[ "$development" == false ]]; then
   test_case="normal image excludes development tools: $image"
   docker run --rm "$image" php -r 'exit(extension_loaded("xdebug") ? 1 : 0);'
-  docker run --rm "$image" sh -ec '! command -v composer'
+  docker run --rm "$image" sh -ec '! command -v composer && ! command -v pie'
   exit 0
 fi
 
@@ -54,9 +54,10 @@ docker run --rm -e XDEBUG_MODE=coverage "$image" php -r '
 if (!in_array("coverage", xdebug_info("mode"), true)) { exit(1); }
 xdebug_start_code_coverage(); xdebug_stop_code_coverage();
 '
-test_case="Composer runs as the web user in $image"
+test_case="Composer and PIE run as the web user in $image"
 docker run --rm --user www-data -e COMPOSER_HOME=/tmp/composer-home "$image" sh -ec '
   composer --version
+  pie --version --no-ansi
   cache=$(composer config --global cache-dir)
   mkdir -p "$cache"
   touch "$cache/write-test"

@@ -53,11 +53,12 @@ reject '.packageType = "zip"'
 reject '.packageType = false'
 reject '.states.stable.packageType = false'
 reject '.phpVersions[.php].pecl.redis = "latest"'
-for tool in composer xdebug npm; do
+for tool in composer pie xdebug npm; do
     reject ".development.$tool.sha256 = \"invalid\""
     reject ".development.$tool.version = \"latest\""
+    reject "del(.development.$tool.package)"
 done
-reject 'del(.development.xdebug.package)'
+reject '.development.pie.package = "http://example.test/pie.phar"'
 reject '.development.xdebug.package = "https://xdebug.org/files/xdebug-100.0.0.tgz"'
 reject '.development.xdebug.package = "https://github.com/xdebug/xdebug/archive/refs/tags/100.0.1.tar.gz"'
 reject '.states = {}'

@@ -98,12 +98,14 @@ while IFS=$'\t' read -r version state; do
           dir+='-dev'
           composerVersion="$(jq -r '.development.composer.version' <<<"$details")"
           composerSha256="$(jq -r '.development.composer.sha256' <<<"$details")"
+          pieVersion="$(jq -r '.development.pie.version' <<<"$details")"
+          pieSha256="$(jq -r '.development.pie.sha256' <<<"$details")"
           xdebugVersion="$(jq -r '.development.xdebug.version' <<<"$details")"
           xdebugSha256="$(jq -r '.development.xdebug.sha256' <<<"$details")"
           xdebugPackage="$(jq -r '.development.xdebug.package' <<<"$details")"
           npmVersion="$(jq -r '.development.npm.version' <<<"$details")"
           npmSha256="$(jq -r '.development.npm.sha256' <<<"$details")"
-          export composerVersion composerSha256 xdebugVersion xdebugSha256 xdebugPackage npmVersion npmSha256
+          export composerVersion composerSha256 pieVersion pieSha256 xdebugVersion xdebugSha256 xdebugPackage npmVersion npmSha256
         fi
 
         mkdir -p "$staging/$dir"

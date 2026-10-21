@@ -13,7 +13,10 @@ fixture() {
     jq --slurpfile helper "$root/versions-helper.json" --arg fixture "$1" \
         -f "$root/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$root/versions.json}"
 }
-helper_settings() { jq 'walk(if type == "object" then del(.sha256, .sha512) else . end) | map_values(if .development != null then .development.xdebug |= del(.package) else . end)'; }
+helper_settings() {
+    jq 'walk(if type == "object" then del(.sha256, .sha512) else . end)
+      | map_values(if .development != null then .development |= map_values(del(.package)) else . end)'
+}
 printf 'verified Joomla fixture\n' > "$work/payload"
 export FIXTURE_PAYLOAD="$work/payload" FIXTURE_CALLS="$work/calls"
 FIXTURE_SHA256="$(sha256sum "$work/payload" | cut -d ' ' -f1)"
@@ -35,7 +38,8 @@ while (($#)); do
 done
 printf '%s\n' "$url" >> "$FIXTURE_CALLS"
 [[ "${FIXTURE_FAILURE:-}" != http ]] || exit 22
-if [[ "${FIXTURE_FAILURE:-}" == connection && "$url" == https://github.com/xdebug/xdebug/archive/* ]]; then exit 7; fi
+if [[ "${FIXTURE_FAILURE:-}" == connection && "$url" == https://github.com/xdebug/xdebug/* ]]; then exit 7; fi
+if [[ "${FIXTURE_FAILURE:-}" == pie && "$url" == https://github.com/php/pie/* ]]; then exit 22; fi
 if [[ "${FIXTURE_FAILURE:-}" == tool && "$url" != https://*github.com/* ]]; then exit 22; fi
 if [[ "${FIXTURE_FAILURE:-}" == npm && "$url" == https://registry.npmjs.org/* ]]; then exit 22; fi
 if [[ "$url" == https://api.github.com/* ]]; then
@@ -95,7 +99,9 @@ expected_calls="$(jq '[.[] | .states | length] | add * 2' versions-helper.json)"
 expected_calls=$((expected_calls + tool_calls))
 ./versions.sh
 jq -e --arg sha512 "$FIXTURE_SHA512" --arg sha256 "$FIXTURE_SHA256" \
-    'all(.[]; all(.states[]; .sha512 == $sha512) and all(.development[]; .sha256 == $sha256))' versions.json >/dev/null
+    'all(.[]; all(.states[]; .sha512 == $sha512) and all(.development[]; .sha256 == $sha256)
+      and (.development.xdebug | .package == "https://github.com/xdebug/xdebug/archive/refs/tags/\(.version).tar.gz")
+      and (.development.pie | .package == "https://github.com/php/pie/releases/download/\(.version)/pie.phar"))' versions.json >/dev/null
 [[ "$(wc -l < "$FIXTURE_CALLS")" == "$expected_calls" ]]
 grep -Fxq 'https://github.com/xdebug/xdebug/archive/refs/tags/100.0.0.tar.gz' "$FIXTURE_CALLS"
 cp versions.json "$work/baseline.json"
@@ -108,12 +114,13 @@ test_case="force refresh only the selected release and its tools"
 [[ "$(wc -l < "$FIXTURE_CALLS")" == "$((expected_calls + 2 + tool_calls))" ]]
 cmp versions.json "$work/baseline.json"
 cmp versions-helper.json "$work/original-helper.json"
+
 reject() {
     test_case="reject failed resolution without changing versions.json: $*"
     if "$@" > "$work/log" 2>&1; then echo "FAIL: unexpectedly succeeded: $*" >&2; exit 1; fi
     cmp versions.json "$work/baseline.json"
 }
-for failure in http connection missing duplicate digest checksum tool npm composer-digest composer-checksum; do
+for failure in http connection missing duplicate digest checksum tool pie npm composer-digest composer-checksum; do
     reject env FIXTURE_FAILURE="$failure" ./versions.sh --force
 done
 test_case="compute checksums when release metadata has no digest"
@@ -141,8 +148,7 @@ while IFS= read -r tool; do
     if [[ "$tool" == composer ]]; then calls=2; fi
     [[ "$(wc -l < "$FIXTURE_CALLS")" == "$((before + calls))" ]]
     jq -e --arg series "$series" --arg tool "$tool" --arg sha "$FIXTURE_SHA256" --slurpfile helper versions-helper.json \
-        '.[$series].development[$tool] == ($helper[0][$series].development[$tool] + {sha256:$sha}
-          + if $tool == "xdebug" then {package: ("https://github.com/xdebug/xdebug/archive/refs/tags/" + $helper[0][$series].development[$tool].version + ".tar.gz")} else {} end)' versions.json >/dev/null
+        '(.[$series].development[$tool] | del(.package)) == ($helper[0][$series].development[$tool] + {sha256:$sha})' versions.json >/dev/null
 done < <(jq -r --arg series "$series" '.[$series].development | keys[]' versions-helper.json)
 
 test_case="remove a release from metadata while preserving historical files"

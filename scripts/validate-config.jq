@@ -42,11 +42,13 @@ require(type == "object" and length > 0; "configuration must contain at least on
         | if .development != null then
             require(($series | split(".") | map(tonumber)) >= [6,2]; "\($series): development variants require Joomla 6.2 or later")
             | require(.development | type == "object"; "\($series): development must be an object")
-            | reduce ["composer", "xdebug", "npm"][] as $tool (.;
+            | reduce ["composer", "pie", "xdebug", "npm"][] as $tool (.;
                 require(.development[$tool].version | version_number; "\($series): invalid \($tool) version")
                 | if $mode == "resolved" then
                     require(.development[$tool].sha256 | sha256; "\($series): missing or invalid \($tool) SHA256")
                     | .development[$tool].sha256 |= ascii_downcase
+                    | require(.development[$tool].package | type == "string" and test("^https://[^[:space:]]+$");
+                        "\($series): missing or invalid \($tool) package URL; run ./update.sh")
                     | if $tool == "xdebug" then
                         require(.development.xdebug.package == ("https://github.com/xdebug/xdebug/archive/refs/tags/" + .development.xdebug.version + ".tar.gz");
                           "\($series): run ./versions.sh to resolve the Xdebug source archive and checksum")

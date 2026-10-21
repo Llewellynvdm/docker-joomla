@@ -5,18 +5,21 @@ normal counterparts, plus backend and frontend development tools. Xdebug is
 **enabled by default** with `develop,debug`. PHP reports development errors,
 checks changed files immediately, and disables JIT.
 
+The PHP and Xdebug configuration is baked into the image during its build.
+No external INI file or configuration mount is needed to start debugging.
+
 | Work | Included tools |
 | --- | --- |
-| PHP development and debugging | Composer, Xdebug and the normal Joomla PHP extensions |
+| PHP development and debugging | Composer, PIE (PHP Installer for Extensions), Xdebug and the normal Joomla PHP extensions |
 | Frontend development | Node.js, npm, npx, Python 3, make and g++ for native npm modules |
 | Repository and file work | Git, OpenSSH client, patch, zip, unzip, rsync, jq, less and nano |
 | Database inspection | MariaDB/MySQL, PostgreSQL and SQLite command-line clients |
 
 Node.js follows the distribution used by the matching PHP base image. npm,
-Composer and Xdebug versions are selected in `versions-helper.json`; the update
+Composer, PIE and Xdebug versions are selected in `versions-helper.json`; the update
 scripts resolve their download checksums automatically.
 
-Xdebug is built from its official GitHub release tag. `versions.json` records
+Xdebug is installed with PIE from its official GitHub release tag. `versions.json` records
 the archive URL and SHA256 together, and the Dockerfile uses that exact pair.
 The next update refreshes older Xdebug hashes that have no matching source URL.
 
@@ -188,27 +191,33 @@ whole `/var/www/html` directory, including `vendor` and `cli`, to the same code
 in the IDE. The CLI checks above describe CLI PHP; custom Apache/FPM settings
 can still differ.
 
-For connection details from an actual web request, create a local
-`xdebug-local.ini` containing:
+For connection details from an actual web request, temporarily enable logging
+inside the running container and restart its PHP server:
 
-```ini
-xdebug.log = /tmp/joomla-xdebug.log
-xdebug.log_level = 7
+```bash
+docker compose exec --user root joomla sh -c '
+printf "%s\n" "xdebug.log = /tmp/joomla-xdebug.log" "xdebug.log_level = 7" \
+  > "$PHP_INI_DIR/conf.d/zzz-xdebug-diagnostics.ini"
+'
+docker compose restart joomla
 ```
 
-Add this read-only bind mount to the existing Joomla service's `volumes` list:
-
-```yaml
-- ./xdebug-local.ini:/usr/local/etc/php/conf.d/zzz-xdebug-local.ini:ro
-```
-
-Recreate the service, make a triggered browser request, then read the log:
+Make a triggered browser request, then read the log:
 
 ```bash
 docker compose exec joomla cat /tmp/joomla-xdebug.log
 ```
 
-Remove the diagnostic mount and recreate the service when finished.
+Remove the temporary settings and restart when finished:
+
+```bash
+docker compose exec --user root joomla sh -c \
+  'rm -f "$PHP_INI_DIR/conf.d/zzz-xdebug-diagnostics.ini" /tmp/joomla-xdebug.log'
+docker compose restart joomla
+```
+
+These temporary settings require no host configuration file and disappear if
+the container is recreated. They leave trigger-based debugging unchanged.
 
 ## Project tools and permissions
 
