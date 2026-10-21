@@ -16,6 +16,10 @@ Node.js follows the distribution used by the matching PHP base image. npm,
 Composer and Xdebug versions are selected in `versions-helper.json`; the update
 scripts resolve their download checksums automatically.
 
+Xdebug is built from its official GitHub release tag. `versions.json` records
+the archive URL and SHA256 together, and the Dockerfile uses that exact pair.
+The next update refreshes older Xdebug hashes that have no matching source URL.
+
 ## Switch between normal and development images
 
 Once published, append `-dev` to the existing image tag in `compose.yaml`. The

@@ -57,6 +57,9 @@ for tool in composer xdebug npm; do
     reject ".development.$tool.sha256 = \"invalid\""
     reject ".development.$tool.version = \"latest\""
 done
+reject 'del(.development.xdebug.package)'
+reject '.development.xdebug.package = "https://xdebug.org/files/xdebug-100.0.0.tgz"'
+reject '.development.xdebug.package = "https://github.com/xdebug/xdebug/archive/refs/tags/100.0.1.tar.gz"'
 reject '.states = {}'
 for change in '.states.stable.aliases = []' '.states.stable.aliases = null' 'del(.states.stable.aliases)' 'del(.states.stable)'; do
     test_case="accept optional release setting: $change"

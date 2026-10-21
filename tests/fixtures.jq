@@ -9,6 +9,7 @@ with_entries(
         # dummy hashes; resolver tests exercise the real checksum generation.
         | if .development != null then
             .development |= map_values(. + {sha256: ("0" * 64)})
+            | .development.xdebug.package = ("https://github.com/xdebug/xdebug/archive/refs/tags/" + .development.xdebug.version + ".tar.gz")
           else . end
         | .php = $old.php | .variant = $old.variant | .variants = $old.variants
         | .phpVersions |= with_entries(select(.key as $php | $old.phpVersions | index($php)))
@@ -26,7 +27,7 @@ with_entries(
       | .packageType = "tar.zst"
       | .development = {
           composer: {version: "100.0.0", sha256: ("0" * 64)},
-          xdebug: {version: "100.0.0", sha256: ("0" * 64)},
+          xdebug: {version: "100.0.0", sha256: ("0" * 64), package: "https://github.com/xdebug/xdebug/archive/refs/tags/100.0.0.tar.gz"},
           npm: {version: "100.0.0", sha256: ("0" * 64)}
         }
       | .states = {

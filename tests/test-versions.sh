@@ -13,7 +13,7 @@ fixture() {
     jq --slurpfile helper "$root/versions-helper.json" --arg fixture "$1" \
         -f "$root/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$root/versions.json}"
 }
-helper_settings() { jq 'walk(if type == "object" then del(.sha256, .sha512) else . end)'; }
+helper_settings() { jq 'walk(if type == "object" then del(.sha256, .sha512) else . end) | map_values(if .development != null then .development.xdebug |= del(.package) else . end)'; }
 printf 'verified Joomla fixture\n' > "$work/payload"
 export FIXTURE_PAYLOAD="$work/payload" FIXTURE_CALLS="$work/calls"
 FIXTURE_SHA256="$(sha256sum "$work/payload" | cut -d ' ' -f1)"
@@ -35,7 +35,7 @@ while (($#)); do
 done
 printf '%s\n' "$url" >> "$FIXTURE_CALLS"
 [[ "${FIXTURE_FAILURE:-}" != http ]] || exit 22
-if [[ "${FIXTURE_FAILURE:-}" == connection && "$url" == https://xdebug.org/* ]]; then exit 7; fi
+if [[ "${FIXTURE_FAILURE:-}" == connection && "$url" == https://github.com/xdebug/xdebug/archive/* ]]; then exit 7; fi
 if [[ "${FIXTURE_FAILURE:-}" == tool && "$url" != https://*github.com/* ]]; then exit 22; fi
 if [[ "${FIXTURE_FAILURE:-}" == npm && "$url" == https://registry.npmjs.org/* ]]; then exit 22; fi
 if [[ "$url" == https://api.github.com/* ]]; then
@@ -97,6 +97,7 @@ expected_calls=$((expected_calls + tool_calls))
 jq -e --arg sha512 "$FIXTURE_SHA512" --arg sha256 "$FIXTURE_SHA256" \
     'all(.[]; all(.states[]; .sha512 == $sha512) and all(.development[]; .sha256 == $sha256))' versions.json >/dev/null
 [[ "$(wc -l < "$FIXTURE_CALLS")" == "$expected_calls" ]]
+grep -Fxq 'https://github.com/xdebug/xdebug/archive/refs/tags/100.0.0.tar.gz' "$FIXTURE_CALLS"
 cp versions.json "$work/baseline.json"
 test_case="reuse newly resolved hashes without further downloads"
 ./versions.sh
@@ -140,7 +141,8 @@ while IFS= read -r tool; do
     if [[ "$tool" == composer ]]; then calls=2; fi
     [[ "$(wc -l < "$FIXTURE_CALLS")" == "$((before + calls))" ]]
     jq -e --arg series "$series" --arg tool "$tool" --arg sha "$FIXTURE_SHA256" --slurpfile helper versions-helper.json \
-        '.[$series].development[$tool] == ($helper[0][$series].development[$tool] + {sha256:$sha})' versions.json >/dev/null
+        '.[$series].development[$tool] == ($helper[0][$series].development[$tool] + {sha256:$sha}
+          + if $tool == "xdebug" then {package: ("https://github.com/xdebug/xdebug/archive/refs/tags/" + $helper[0][$series].development[$tool].version + ".tar.gz")} else {} end)' versions.json >/dev/null
 done < <(jq -r --arg series "$series" '.[$series].development | keys[]' versions-helper.json)
 
 test_case="remove a release from metadata while preserving historical files"
@@ -169,4 +171,26 @@ before="$(wc -l < "$FIXTURE_CALLS")"
 [[ "$(wc -l < "$FIXTURE_CALLS")" == "$((before + tool_calls))" ]]
 jq --arg mode resolved -f scripts/validate-config.jq versions.json >/dev/null
 jq -e '[.. | objects | keys[] | select(. == "sha256" or . == "sha512")] | length == 0' versions-helper.json >/dev/null
+
+for provenance in missing previous; do
+    test_case="refresh Xdebug checksum with $provenance archive provenance"
+    jq --arg series "$series" --arg provenance "$provenance" '
+        .[$series].development.xdebug |= (.sha256 = ("0" * 64)
+          | if $provenance == "missing" then del(.package)
+            else .package = ("https://xdebug.org/files/xdebug-" + .version + ".tgz") end)
+    ' versions.json > "$work/old-source.json"
+    mv "$work/old-source.json" versions.json
+    cp versions.json "$work/baseline.json"
+    reject env FIXTURE_FAILURE=connection ./versions.sh
+    test_case="resolve Xdebug from the pinned GitHub archive after failed migration"
+    before="$(wc -l < "$FIXTURE_CALLS")"
+    ./versions.sh
+    [[ "$(wc -l < "$FIXTURE_CALLS")" == "$((before + 1))" ]]
+    jq -e --arg series "$series" --arg sha "$FIXTURE_SHA256" '
+        .[$series].development.xdebug | .sha256 == $sha
+        and .package == ("https://github.com/xdebug/xdebug/archive/refs/tags/" + .version + ".tar.gz")
+    ' versions.json >/dev/null
+    ./versions.sh
+    [[ "$(wc -l < "$FIXTURE_CALLS")" == "$((before + 1))" ]]
+done
 echo 'Version resolution tests passed.'

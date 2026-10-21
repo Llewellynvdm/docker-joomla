@@ -75,6 +75,11 @@ check_contexts() {
           contains "$dockerfile" "${tool^^}_${property^^}=$value"
         done
       done
+      value="$(jq -r --arg series "$series" '.[$series].development.xdebug.package' versions.json)"
+      contains "$dockerfile" "XDEBUG_PACKAGE=$value"
+      # shellcheck disable=SC2016 # Check the literal variable used at image build time.
+      contains "$dockerfile" '"$XDEBUG_PACKAGE" -o /tmp/xdebug.tgz'
+      excludes "$dockerfile" 'https://xdebug.org/files/'
       contains "$dockerfile" 'docker-php-ext-enable --ini-name zz-xdebug.ini xdebug'
       contains "$dockerfile" 'JOOMLA_XDEBUG_CLIENT_HOST=host.docker.internal'
       contains "$dockerfile" 'JOOMLA_XDEBUG_CLIENT_PORT=9003'

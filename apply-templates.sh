@@ -100,9 +100,10 @@ while IFS=$'\t' read -r version state; do
           composerSha256="$(jq -r '.development.composer.sha256' <<<"$details")"
           xdebugVersion="$(jq -r '.development.xdebug.version' <<<"$details")"
           xdebugSha256="$(jq -r '.development.xdebug.sha256' <<<"$details")"
+          xdebugPackage="$(jq -r '.development.xdebug.package' <<<"$details")"
           npmVersion="$(jq -r '.development.npm.version' <<<"$details")"
           npmSha256="$(jq -r '.development.npm.sha256' <<<"$details")"
-          export composerVersion composerSha256 xdebugVersion xdebugSha256 npmVersion npmSha256
+          export composerVersion composerSha256 xdebugVersion xdebugSha256 xdebugPackage npmVersion npmSha256
         fi
 
         mkdir -p "$staging/$dir"

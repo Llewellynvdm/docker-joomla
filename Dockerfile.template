@@ -241,6 +241,7 @@ ENV COMPOSER_VERSION={{ env.composerVersion }} \
 	COMPOSER_SHA256={{ env.composerSha256 }} \
 	XDEBUG_VERSION={{ env.xdebugVersion }} \
 	XDEBUG_SHA256={{ env.xdebugSha256 }} \
+	XDEBUG_PACKAGE={{ env.xdebugPackage }} \
 	NPM_VERSION={{ env.npmVersion }} \
 	NPM_SHA256={{ env.npmSha256 }}
 
@@ -278,7 +279,7 @@ RUN set -eux; \
 	ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx; \
 	node -e 'const npm = require("/usr/local/lib/node_modules/npm/package.json"); const semver = require("/usr/local/lib/node_modules/npm/node_modules/semver"); if (!semver.satisfies(process.version, npm.engines.node)) { throw new Error("Node.js " + process.version + " does not satisfy npm: " + npm.engines.node); }'; \
 	curl --fail --show-error --location --retry 3 \
-		"https://xdebug.org/files/xdebug-$XDEBUG_VERSION.tgz" -o /tmp/xdebug.tgz; \
+		"$XDEBUG_PACKAGE" -o /tmp/xdebug.tgz; \
 	echo "$XDEBUG_SHA256  /tmp/xdebug.tgz" | sha256sum -c -; \
 	mkdir /tmp/xdebug; \
 	tar -xzf /tmp/xdebug.tgz -C /tmp/xdebug --strip-components=1; \

@@ -47,6 +47,10 @@ require(type == "object" and length > 0; "configuration must contain at least on
                 | if $mode == "resolved" then
                     require(.development[$tool].sha256 | sha256; "\($series): missing or invalid \($tool) SHA256")
                     | .development[$tool].sha256 |= ascii_downcase
+                    | if $tool == "xdebug" then
+                        require(.development.xdebug.package == ("https://github.com/xdebug/xdebug/archive/refs/tags/" + .development.xdebug.version + ".tar.gz");
+                          "\($series): run ./versions.sh to resolve the Xdebug source archive and checksum")
+                      else . end
                   else . end
               )
           else del(.development) end

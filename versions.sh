@@ -136,12 +136,18 @@ declare -A toolHashes=()
 for series in "${selectedSeries[@]}" "${otherSeries[@]}"; do
     for tool in composer xdebug npm; do
         version="$(jq -r --arg series "$series" --arg tool "$tool" '.[$series].development[$tool].version' "$work/helper.json")"
+        case "$tool" in
+            composer) package="https://getcomposer.org/download/$version/composer.phar" ;;
+            xdebug) package="https://github.com/xdebug/xdebug/archive/refs/tags/$version.tar.gz" ;;
+            npm) package="https://registry.npmjs.org/npm/-/npm-$version.tgz" ;;
+        esac
         key="$tool:$version"
         if [[ ! -v "toolHashes[$key]" ]]; then
             cached=
             if [ -f versions.json ]; then
-                cached="$(jq -r --arg tool "$tool" --arg version "$version" '
+                cached="$(jq -r --arg tool "$tool" --arg version "$version" --arg package "$package" '
                     [.[] | .development[$tool] | select(.version == $version)
+                        | select($tool != "xdebug" or .package == $package)
                         | .sha256 | select(type == "string" and test("^[a-fA-F0-9]{64}$"))][0] // ""
                 ' versions.json)"
             fi
@@ -153,11 +159,6 @@ for series in "${selectedSeries[@]}" "${otherSeries[@]}"; do
                     exit 1
                 fi
                 echo "Resolving $tool $version ($series)" >&2
-                case "$tool" in
-                    composer) package="https://getcomposer.org/download/$version/composer.phar" ;;
-                    xdebug) package="https://xdebug.org/files/xdebug-$version.tgz" ;;
-                    npm) package="https://registry.npmjs.org/npm/-/npm-$version.tgz" ;;
-                esac
                 fetch "$package" -o "$work/tool"
                 checksum="$(sha256sum "$work/tool")"
                 toolHashes[$key]="${checksum%% *}"
@@ -171,8 +172,9 @@ for series in "${selectedSeries[@]}" "${otherSeries[@]}"; do
                 rm -f "$work/tool"
             fi
         fi
-        jq --arg series "$series" --arg tool "$tool" --arg sha256 "${toolHashes[$key]}" '
+        jq --arg series "$series" --arg tool "$tool" --arg sha256 "${toolHashes[$key]}" --arg package "$package" '
             .[$series].development[$tool].sha256 = $sha256
+            | if $tool == "xdebug" then .[$series].development[$tool].package = $package else . end
         ' "$work/result.json" > "$work/next.json"
         mv "$work/next.json" "$work/result.json"
     done
