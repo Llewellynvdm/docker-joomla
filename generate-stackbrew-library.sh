@@ -30,12 +30,57 @@ if (($#)); then
     <<<"$plan")"
 fi
 
-command -v bashbrew >/dev/null || die 'bashbrew is required to resolve the PHP image architectures'
 git rev-parse --verify HEAD >/dev/null
 
 # Buffer output so a failed validation never emits a plausible partial manifest.
 output="$(mktemp)"
-trap 'rm -f "$output"' EXIT
+metadata="$(mktemp)"
+trap 'rm -f "$output" "$metadata"' EXIT
+
+# Read the official-images RFC2822-style fields using standard awk. Tags must
+# resolve to exactly one stanza, including when fields wrap onto indented lines.
+parent_architectures_for() {
+  awk -v tag="${1#php:}" '
+    function trim(value) {
+      sub(/^[[:space:]]+/, "", value)
+      sub(/[[:space:]]+$/, "", value)
+      return value
+    }
+    function finish(    count, tags, i, name) {
+      count = split(fields["Tags"], tags, ",")
+      for (i = 1; i <= count; i++) {
+        if (trim(tags[i]) == tag) {
+          matches++
+          architectures = fields["Architectures"]
+          if (malformed) invalid = 1
+        }
+      }
+      for (name in fields) delete fields[name]
+      key = ""
+      malformed = 0
+    }
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*$/ { finish(); next }
+    /^[[:space:]]/ {
+      if (key != "") fields[key] = fields[key] " " trim($0)
+      else malformed = 1
+      next
+    }
+    {
+      separator = index($0, ":")
+      if (!separator) { malformed = 1; next }
+      key = substr($0, 1, separator - 1)
+      if (key in fields) malformed = 1
+      fields[key] = trim(substr($0, separator + 1))
+    }
+    END {
+      finish()
+      if (matches != 1 || invalid || trim(architectures) == "") exit 1
+      gsub(/,/, " ", architectures)
+      print architectures
+    }
+  ' "$metadata"
+}
 
 maintainers="$(jq -er 'map(.firstname + " " + .lastname + " <" + .email + "> (@" + .github + ")") | join(",\n             ")' maintainers.json)"
 git_repo="${STACKBREW_GIT_REPO:-https://github.com/joomla-docker/docker-joomla.git}"
@@ -59,8 +104,7 @@ while IFS= read -r context; do
   [[ -z "$(git status --porcelain --untracked-files=all -- "$directory")" ]] \
     || die "uncommitted changes in $directory; commit generated files before creating the publication manifest"
 
-  # There is one official PHP parent. Development tooling is installed from
-  # verified archives. Reject unsupported dependency structures rather than
+  # There is one official PHP parent. Reject unsupported dependency structures rather than
   # silently declaring architectures for an unrecognised image dependency.
   parent="$(awk '
     /^[[:space:]]*#/ { next }
@@ -76,7 +120,11 @@ while IFS= read -r context; do
     END { if (count != 1 || bad) exit 1; print image }
   ' "$directory/Dockerfile")" || die "unsupported image dependencies in $directory/Dockerfile"
 
-  expected_parent="$(jq -r '"php:" + .php + "-" + .variant + (if .series == "4.4" and .variant != "fpm-alpine" then "-bookworm" else "" end)' <<<"$context")"
+  expected_parent="$(jq -r --argjson context "$context" '
+    .[$context.series].phpVersions[$context.php]
+    | if $context.development then . * .dev else . end
+    | .variants[$context.variant].base
+  ' <<<"$configuration")"
   [[ "$parent" == "$expected_parent" ]] || die "$directory/Dockerfile has parent $parent, expected $expected_parent; regenerate it"
   expected_version="$(jq -r '.version' <<<"$context")"
   actual_version="$(awk '
@@ -86,9 +134,14 @@ while IFS= read -r context; do
   [[ "$actual_version" == "$expected_version" ]] || die "$directory/Dockerfile does not contain Joomla $expected_version; regenerate it"
 
   if [[ ! -v "parent_architectures[$parent]" ]]; then
-    architectures="$(bashbrew cat --format '{{ join " " .TagEntry.Architectures }}' \
-      "https://github.com/docker-library/official-images/raw/master/library/$parent")" \
-      || die "could not resolve architectures for $parent"
+    if [[ ! -s "$metadata" ]]; then
+      curl --fail --show-error --silent --location --retry 3 --connect-timeout 15 --max-time 300 \
+        --proto '=https' --proto-redir '=https' \
+        https://raw.githubusercontent.com/docker-library/official-images/master/library/php \
+        -o "$metadata" || die 'could not download PHP architecture metadata'
+    fi
+    architectures="$(parent_architectures_for "$parent")" \
+      || die "missing or ambiguous architecture metadata for $parent"
     [[ -n "$architectures" && "$architectures" != *$'\n'* ]] || die "missing or ambiguous architecture metadata for $parent"
     read -r -a architecture_list <<<"$architectures"
     ((${#architecture_list[@]})) || die "missing or ambiguous architecture metadata for $parent"

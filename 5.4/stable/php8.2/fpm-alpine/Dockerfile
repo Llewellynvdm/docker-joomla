@@ -1,4 +1,4 @@
-# NOTE: THIS DOCKERFILE IS GENERATED VIA "apply-templates.sh". DO NOT EDIT.
+# NOTE: THIS DOCKERFILE IS GENERATED VIA "build.sh". DO NOT EDIT.
 FROM php:8.2-fpm-alpine
 LABEL maintainer="Llewellyn van der Merwe <llewellyn.van-der-merwe@community.joomla.org> (@Llewellynvdm), Harald Leithner <harald.leithner@community.joomla.org> (@HLeithner)"
 

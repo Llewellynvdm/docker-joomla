@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 
-# Keep the established helper -> versions -> templates flow. Force refreshes
+# Keep the established helper -> versions -> build contexts flow. Force refreshes
 # package metadata; all generated directories remain under manual management.
 targets=()
 for argument; do
@@ -16,4 +16,4 @@ for argument; do
     esac
 done
 ./versions.sh "$@"
-./apply-templates.sh "${targets[@]}"
+./build.sh "${targets[@]}"

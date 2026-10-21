@@ -1,4 +1,4 @@
-name: Verify Templating
+name: Verify Dockerfile Generation
 
 on:
   pull_request:
@@ -12,7 +12,7 @@ defaults:
     shell: bash -Eeuo pipefail {0}
 
 jobs:
-  apply-templates:
+  generate-dockerfiles:
     name: Validate generators and committed outputs
     runs-on: ubuntu-latest
     steps:
@@ -20,15 +20,15 @@ jobs:
         with:
           persist-credentials: false
       - name: Install generator test dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 jq shellcheck
-      - name: Test configuration, resolution, tags and templates
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends jq shellcheck
+      - name: Test configuration, resolution, tags and Dockerfile generation
         run: |
-          shellcheck update.sh versions.sh apply-templates.sh generate-stackbrew-library.sh tests/*.sh
+          shellcheck update.sh versions.sh build.sh generate-stackbrew-library.sh tests/*.sh
           ./tests/test-config.sh
           ./tests/test-versions.sh
           ./tests/test-tags.sh
           ./tests/test-manifest.sh
-          ./tests/test-templates.sh
+          ./tests/test-build.sh
       - name: Verify committed generated outputs
         env:
           GITHUB_TOKEN: ${{ github.token }}

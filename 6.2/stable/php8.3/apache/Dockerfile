@@ -1,4 +1,4 @@
-# NOTE: THIS DOCKERFILE IS GENERATED VIA "apply-templates.sh". DO NOT EDIT.
+# NOTE: THIS DOCKERFILE IS GENERATED VIA "build.sh". DO NOT EDIT.
 FROM php:8.3-apache
 LABEL maintainer="Llewellyn van der Merwe <llewellyn.van-der-merwe@community.joomla.org> (@Llewellynvdm), Harald Leithner <harald.leithner@community.joomla.org> (@HLeithner)"
 
@@ -15,7 +15,7 @@ RUN set -eux; \
 	apt-get install -y --no-install-recommends $PHPIZE_DEPS libbz2-dev libgmp-dev libicu-dev libfreetype6-dev libjpeg-dev libldap2-dev libmemcached-dev libmagickwand-dev libpq-dev libpng-dev libwebp-dev libzip-dev automake libtool zlib1g-dev unzip zstd; \
 	DEB_BUILD_MULTIARCH="$(dpkg-architecture --query DEB_BUILD_MULTIARCH)"; \
 	docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp; \
-	docker-php-ext-configure ldap "--with-libdir=lib/${DEB_BUILD_MULTIARCH}"; \
+	docker-php-ext-configure ldap --with-libdir=lib/"${DEB_BUILD_MULTIARCH}"; \
 	docker-php-ext-install -j "$(nproc)" bz2 bcmath exif gd gmp intl ldap mysqli pdo_mysql pdo_pgsql pgsql zip; \
 	curl --fail --show-error --silent --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 300 --proto '=https' --proto-redir '=https' https://github.com/php/pie/releases/download/1.5.2/pie.phar -o /tmp/pie; \
 	echo 'fe70c59738cf56ec00a818cf9cb9593da171aac86f5f1f859995b8839dfd2cc7  /tmp/pie' | sha256sum -c -; \

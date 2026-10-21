@@ -25,18 +25,18 @@ jobs:
         with:
           persist-credentials: false
       - name: Install generator dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 jq
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends jq
       - name: Resolve versions and generate contexts
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: ./update.sh
-      - name: Verify deterministic templating and prepare matrix
+      - name: Verify deterministic generation and prepare matrix
         id: generate
         run: |
           jq -c -f scripts/tags.jq versions.json > "$RUNNER_TEMP/contexts.json"
           mapfile -t contexts < <(jq -r '.[].directory' "$RUNNER_TEMP/contexts.json")
           find "${contexts[@]}" -type f -print0 | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/before.sha256"
-          ./apply-templates.sh
+          ./build.sh
           find "${contexts[@]}" -type f -print0 | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/after.sha256"
           cmp "$RUNNER_TEMP/before.sha256" "$RUNNER_TEMP/after.sha256"
           matrix=$(jq -c '{include: map({directory, variant, development, latest: (.tags | index("latest") != null), image: ("joomla:" + .tags[0])})}' "$RUNNER_TEMP/contexts.json")

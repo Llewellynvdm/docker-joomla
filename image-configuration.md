@@ -1,8 +1,8 @@
 # Image configuration
 
 `versions-helper.json` is the human-maintained input. `./update.sh` validates it,
-resolves download checksums into `versions.json`, and renders the build contexts.
-Only `versions.json` is read during template generation. Commit both the resolved
+resolves download checksums into `versions.json`, and runs `./build.sh` to generate
+the build contexts. Only `versions.json` is read during Dockerfile generation. Commit both the resolved
 file and generated contexts after reviewing an update. No hashes belong in the helper.
 
 Each series selects release `states`, PHP versions, runtime variants and tag
@@ -60,16 +60,20 @@ preserved in generated configuration. `${DEB_BUILD_MULTIARCH}` is the supported
 build-time substitution for bundled extension configure arguments; it is resolved
 inside the target Debian image, never on the generator host.
 
-Generation requires Bash, jq and Python 3 (standard library only). The Python
-renderer implements installation mechanics; software selections, URLs, versions,
-settings, paths and variant choices stay in JSON. Each generated Dockerfile has
-one installation `RUN`, with one complete step per continued line. No additional
-build script or mounted configuration file is required inside the image.
+`./build.sh` uses Bash and jq to generate complete Dockerfiles without a template
+file or external templating engine. It implements installation mechanics;
+software selections, URLs, versions, settings, paths and variant choices stay in
+JSON. Each generated Dockerfile has one installation
+`RUN`, with one complete step per continued line. No additional build script or
+mounted configuration file is required inside the image.
+
+Manifest generation retrieves official PHP architecture metadata with `curl` and
+parses it with standard shell tools.
 
 Run the generator checks with:
 
 ```bash
-for test in config versions tags manifest templates; do
+for test in config versions tags manifest build; do
     ./tests/test-"$test".sh
 done
 ```

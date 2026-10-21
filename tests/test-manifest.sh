@@ -11,27 +11,54 @@ cp "$repository/scripts/"*.jq "$temporary/repository/scripts/"
 jq --arg fixture current \
   -f "$repository/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repository/versions.json}" >"$temporary/repository/versions.json"
 
-# Stub only architecture discovery; the publication plan uses the active releases.
-cat >"$temporary/bin/bashbrew" <<'MOCK'
+# Stub only the metadata download; architecture parsing uses real shell code.
+cat >"$temporary/bin/curl" <<'MOCK'
 #!/usr/bin/env bash
 set -Eeuo pipefail
-printf '%s\n' "$*" >>"$BASHBREW_TEST_LOG"
-printf '%s\n' "${BASHBREW_TEST_ARCHITECTURES-amd64 arm64v8}"
+printf '%s\n' "$*" >>"$PHP_METADATA_TEST_LOG"
+if [[ ${PHP_METADATA_TEST_FAIL:-0} == 1 ]]; then exit 22; fi
+destination=''
+source_found=0
+while (($#)); do
+  case "$1" in
+    -o) destination=$2; shift ;;
+    https://raw.githubusercontent.com/docker-library/official-images/master/library/php) source_found=1 ;;
+  esac
+  shift
+done
+[[ -n $destination && $source_found == 1 ]]
+cp "$PHP_METADATA_TEST_FILE" "$destination"
 MOCK
-chmod +x "$temporary/bin/bashbrew"
-export PATH="$temporary/bin:$PATH" BASHBREW_TEST_LOG="$temporary/bashbrew.log"
+chmod +x "$temporary/bin/curl"
+export PATH="$temporary/bin:$PATH" PHP_METADATA_TEST_LOG="$temporary/download.log" PHP_METADATA_TEST_FILE="$temporary/php-metadata"
 cd "$temporary/repository"
+# Parent image names come from JSON, including configured variant overrides.
+jq '
+  to_entries[0].key as $series
+  | .[$series].php as $php
+  | .[$series].variants[0] as $variant
+  | .[$series].phpVersions[$php].variants[$variant].base += "-fixture"
+' versions.json >"$temporary/configured.json"
+mv "$temporary/configured.json" versions.json
 jq -f scripts/tags.jq versions.json >"$temporary/plan.json"
-# The 4.4 Bookworm suffix is a fixed compatibility rule in the production
-# template, not the selection of a release for this test.
 while IFS=$'\t' read -r directory version parent; do
   mkdir -p "$directory"
   printf 'FROM %s\nENV JOOMLA_VERSION=%s\nCOPY runtime.ini /usr/local/etc/php/conf.d/runtime.ini\n' \
     "$parent" "$version" >"$directory/Dockerfile"
   printf '; fixture\n' >"$directory/runtime.ini"
   printf '%s\n' "$parent" >>"$temporary/parents"
-done < <(jq -r '.[] | [.directory, .version,
-  ("php:" + .php + "-" + .variant + (if .series == "4.4" and .variant != "fpm-alpine" then "-bookworm" else "" end))] | @tsv' "$temporary/plan.json")
+done < <(jq -r --slurpfile config versions.json '
+  .[] as $context
+  | $config[0][$context.series].phpVersions[$context.php]
+  | if $context.development then . * .dev else . end
+  | [$context.directory, $context.version, .variants[$context.variant].base] | @tsv
+' "$temporary/plan.json")
+while IFS= read -r parent; do
+  # Exercise wrapped Tags and Architectures, plus an unrelated tag per stanza.
+  printf 'Tags: unrelated-%s,\n      %s\nArchitectures: amd64,\n               arm64v8\n\n' \
+    "${parent#php:}" "${parent#php:}"
+done < <(sort -u "$temporary/parents") >"$PHP_METADATA_TEST_FILE"
+cp "$PHP_METADATA_TEST_FILE" "$temporary/valid-metadata"
 mkdir -p obsolete
 printf 'FROM unavailable:obsolete\n' >obsolete/Dockerfile
 git init -q
@@ -48,8 +75,8 @@ cmp "$temporary/expected-tags" "$temporary/actual-tags"
 jq -r '.[] | "Directory: " + .directory' "$temporary/plan.json" >"$temporary/expected-paths"
 grep '^Directory:' "$temporary/manifest" >"$temporary/actual-paths"
 cmp "$temporary/expected-paths" "$temporary/actual-paths"
-test_case="discover architectures once per parent image"
-[[ "$(wc -l <"$BASHBREW_TEST_LOG")" == "$(sort -u "$temporary/parents" | wc -l)" ]]
+test_case="download metadata once for all parent images"
+[[ "$(wc -l <"$PHP_METADATA_TEST_LOG")" == 1 ]]
 grep -q '^Architectures: amd64, arm64v8$' "$temporary/manifest"
 
 test_case="selected track honors repository and ref overrides"
@@ -91,10 +118,18 @@ test_case="a changed copied file updates the context GitCommit"
 jq -ne --arg text "$(cat "$temporary/copied-file")" --arg commit "$(git rev-parse HEAD)" --arg directory "$directory" \
   '$text | contains("GitCommit: " + $commit + "\nDirectory: " + $directory)' >/dev/null
 for architectures in '' '   ' unrecognised; do
-  export BASHBREW_TEST_ARCHITECTURES="$architectures"
+  printf 'Tags: %s\nArchitectures: %s\n' "${parent#php:}" "$architectures" >"$PHP_METADATA_TEST_FILE"
   reject 'architecture'
 done
-unset BASHBREW_TEST_ARCHITECTURES
+printf 'Tags: unknown-tag\nArchitectures: amd64\n' >"$PHP_METADATA_TEST_FILE"
+reject 'missing or ambiguous architecture'
+cp "$temporary/valid-metadata" "$PHP_METADATA_TEST_FILE"
+printf 'Tags: %s\nArchitectures: amd64\n' "${parent#php:}" >>"$PHP_METADATA_TEST_FILE"
+reject 'missing or ambiguous architecture'
+cp "$temporary/valid-metadata" "$PHP_METADATA_TEST_FILE"
+export PHP_METADATA_TEST_FAIL=1
+reject 'could not download PHP architecture metadata'
+unset PHP_METADATA_TEST_FAIL
 
 for instruction in $'COPY \\\n  --from=external:test /tool /tool' \
     $'RUN \\\n  --mount=type=bind,from=external:test,target=/tools true' 'FROM unknown:test'; do
