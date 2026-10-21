@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+test_case="configuration test setup"
+trap 'echo "FAIL: $test_case (${BASH_SOURCE[0]}:$LINENO)" >&2' ERR
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
+test_case="maintained helper and resolved snapshot are valid"
 # Validate the maintained helper and the current resolved snapshot independently.
 jq --arg mode helper -f "$repo/scripts/validate-config.jq" "$repo/versions-helper.json" >/dev/null
 jq --slurpfile helper "$repo/versions-helper.json" --arg fixture current \
@@ -21,11 +24,13 @@ check() {
 # are generated into the resolved snapshot and must never be required here.
 jq 'walk(if type == "object" then del(.sha256, .sha512) else . end)' \
     "$work/settings.json" > "$work/helper.json"
+test_case="helper accepts versions and settings without checksums"
 check "$work/helper.json" helper
 if check "$work/settings.json" helper >"$work/log" 2>&1; then
     echo 'FAIL: helper accepted generated checksums' >&2; exit 1
 fi
 reject() {
+    test_case="reject invalid configuration: $1"
     jq "$1" "$work/settings.json" > "$work/invalid.json"
     if check "$work/invalid.json" >"$work/log" 2>&1; then
         echo "FAIL: accepted invalid configuration: $1" >&2; exit 1
@@ -54,6 +59,7 @@ for tool in composer xdebug npm; do
 done
 reject '.states = {}'
 for change in '.states.stable.aliases = []' '.states.stable.aliases = null' 'del(.states.stable.aliases)' 'del(.states.stable)'; do
+    test_case="accept optional release setting: $change"
     jq "$change" "$work/settings.json" > "$work/valid.json"
     check "$work/valid.json"
 done

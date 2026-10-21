@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+test_case="template test setup"
+trap 'echo "FAIL: $test_case (${BASH_SOURCE[0]}:$LINENO)" >&2' ERR
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 scratch="$(mktemp -d)"
@@ -20,6 +22,7 @@ contains() { grep -Fq -- "$2" "$1" || fail "$1 does not contain: $2"; }
 excludes() { if grep -Fq -- "$2" "$1"; then fail "$1 unexpectedly contains: $2"; fi; }
 snapshot() { find . -type f -print0 | sort -z | xargs -0 sha256sum; }
 
+test_case="render configured contexts and preserve historical folders"
 prepare "$scratch/current"
 jq --slurpfile helper "$repo/versions-helper.json" --arg fixture current \
   -f "$repo/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repo/versions.json}" >"$scratch/current/versions.json"
@@ -43,15 +46,16 @@ check_contexts() {
   while IFS=$'\t' read -r series state php variant dev version checksum; do
     directory="$series/$state/php$php/$variant"
     if [[ "$dev" == true ]]; then directory+='-dev'; fi
+    test_case="generated context $directory"
     dockerfile="$directory/Dockerfile"
     parent="$(awk '$1 == "FROM" { print $2 }' "$dockerfile")"
     expected_parent="php:$php-$variant"
     # Only the fixed legacy 4.4 compatibility rule selects Bookworm.
     if [[ "$series" == 4.4 && "$variant" != fpm-alpine ]]; then expected_parent+='-bookworm'; fi
-    [[ "$parent" == "$expected_parent" ]] || fail "incorrect parent: $parent"
+    [[ "$parent" == "$expected_parent" ]] || fail "$dockerfile has parent $parent; expected $expected_parent"
     contains "$dockerfile" "ENV JOOMLA_VERSION=$version"
     contains "$dockerfile" "ENV JOOMLA_SHA512=$checksum"
-    [[ -x "$directory/docker-entrypoint.sh" ]] || fail 'entrypoint lost executable mode'
+    [[ -x "$directory/docker-entrypoint.sh" ]] || fail "$directory/docker-entrypoint.sh lost executable mode"
     if [[ "$variant" == apache ]]; then
       contains "$dockerfile" 'CMD ["apache2-foreground"]'
     else
@@ -82,22 +86,25 @@ check_contexts() {
       excludes "$dockerfile" 'COMPOSER_VERSION='
       excludes "$dockerfile" 'NPM_VERSION='
       excludes "$dockerfile" 'xdebug'
-      [[ ! -e "$directory/zz-xdebug-settings.ini" ]] || fail 'normal image received development config'
+      [[ ! -e "$directory/zz-xdebug-settings.ini" ]] || fail "$directory received development config"
     fi
   done <"$scratch/contexts"
 
 }
 check_contexts
 
+test_case="repeated rendering leaves every context unchanged"
 snapshot >"$scratch/before"
 mapfile -t selectors < <(jq -r 'keys[] + "/"' versions.json)
 ./apply-templates.sh "${selectors[@]}" >"$scratch/repeat.log"
 snapshot >"$scratch/after"
 cmp "$scratch/before" "$scratch/after"
+test_case="unknown selector leaves every context unchanged"
 if ./apply-templates.sh unknown/state >"$scratch/invalid.log" 2>&1; then fail 'unknown selector succeeded'; fi
 snapshot >"$scratch/after"
 cmp "$scratch/before" "$scratch/after"
 
+test_case="failed render leaves every context unchanged"
 # Even a failed render must leave every previously generated context unchanged.
 printf '\n{{ error("intentional test failure") }}\n' >>Dockerfile.template
 snapshot >"$scratch/before"
@@ -105,6 +112,7 @@ if ./apply-templates.sh >"$scratch/broken.log" 2>&1; then fail 'broken template 
 snapshot >"$scratch/after"
 cmp "$scratch/before" "$scratch/after"
 
+test_case="render a prerelease-only series without a stable folder"
 # An isolated synthetic prerelease covers creation without an existing stable folder.
 prepare "$scratch/prerelease"
 if [[ -f .jq-template.awk ]]; then cp .jq-template.awk "$scratch/prerelease/"; fi

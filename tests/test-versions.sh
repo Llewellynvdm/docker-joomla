@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2016 # The edit_helper arguments contain jq variables.
 set -Eeuo pipefail
+test_case="version resolver test setup"
+trap 'echo "FAIL: $test_case (${BASH_SOURCE[0]}:$LINENO)" >&2' ERR
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -63,6 +65,7 @@ export PATH="$work/bin:$PATH"
 unset VERSIONS_HELPER
 cd "$work/repo"
 
+test_case="reuse resolved hashes without downloads"
 # The helper contains choices; matching hashes come only from the resolved cache.
 fixture current | jq --arg mode resolved -S -f scripts/validate-config.jq > versions.json
 helper_settings < versions.json > versions-helper.json
@@ -70,6 +73,7 @@ cp versions.json "$work/baseline.json"
 ./versions.sh
 cmp versions.json "$work/baseline.json"
 [[ ! -s "$FIXTURE_CALLS" ]]
+test_case="apply helper-only settings without downloads"
 # A helper-only software setting change must take effect without package downloads.
 change='with_entries(.value.phpVersions[.value.php].pecl.redis |= (split(".") | map(tonumber) | .[2] += 1 | map(tostring) | join(".")))'
 jq "$change" versions-helper.json > .versions-helper.json
@@ -79,6 +83,7 @@ cmp versions.json "$work/override.json"
 [[ ! -s "$FIXTURE_CALLS" ]]
 rm .versions-helper.json versions.json
 
+test_case="resolve all configured releases and shared tools"
 # All release states and shared tool pins resolve without a single helper hash.
 fixture synthetic | helper_settings | jq 'map_values(.states |= map_values(del(.package)))' > versions-helper.json
 cp versions-helper.json "$work/original-helper.json"
@@ -92,26 +97,31 @@ jq -e --arg sha512 "$FIXTURE_SHA512" --arg sha256 "$FIXTURE_SHA256" \
     'all(.[]; all(.states[]; .sha512 == $sha512) and all(.development[]; .sha256 == $sha256))' versions.json >/dev/null
 [[ "$(wc -l < "$FIXTURE_CALLS")" == "$expected_calls" ]]
 cp versions.json "$work/baseline.json"
+test_case="reuse newly resolved hashes without further downloads"
 ./versions.sh
 cmp versions.json "$work/baseline.json"
 [[ "$(wc -l < "$FIXTURE_CALLS")" == "$expected_calls" ]]
+test_case="force refresh only the selected release and its tools"
 ./versions.sh --force "$series/rc"
 [[ "$(wc -l < "$FIXTURE_CALLS")" == "$((expected_calls + 2 + tool_calls))" ]]
 cmp versions.json "$work/baseline.json"
 cmp versions-helper.json "$work/original-helper.json"
 reject() {
+    test_case="reject failed resolution without changing versions.json: $*"
     if "$@" > "$work/log" 2>&1; then echo "FAIL: unexpectedly succeeded: $*" >&2; exit 1; fi
     cmp versions.json "$work/baseline.json"
 }
 for failure in http missing duplicate digest checksum tool npm composer-digest composer-checksum; do
     reject env FIXTURE_FAILURE="$failure" ./versions.sh --force
 done
+test_case="compute checksums when release metadata has no digest"
 FIXTURE_FAILURE=no-digest ./versions.sh --force "$series/rc"
 cmp versions.json "$work/baseline.json"
 reject ./versions.sh unknown
 edit_helper() { jq --arg series "$series" "$@" versions-helper.json > "$work/helper.json"; mv "$work/helper.json" versions-helper.json; }
 edit_helper '.[$series].states.rc.version |= sub("rc1$"; "rc2")'
 reject ./versions.sh "$series/stable"
+test_case="resolve a selected release version change"
 ./versions.sh "$series/rc"
 jq -e --arg series "$series" --slurpfile helper versions-helper.json \
     '.[$series].states.rc.version == $helper[0][$series].states.rc.version' versions.json >/dev/null
@@ -122,6 +132,7 @@ while IFS= read -r tool; do
     cp versions.json "$work/baseline.json"
     edit_helper --arg tool "$tool" '.[$series].development[$tool].version |= (split(".") | map(tonumber) | .[2] += 1 | map(tostring) | join("."))'
     reject ./versions.sh "$other"
+    test_case="refresh changed $tool pin without downloading other packages"
     before="$(wc -l < "$FIXTURE_CALLS")"
     ./versions.sh "$series/rc"
     calls=1
@@ -131,6 +142,7 @@ while IFS= read -r tool; do
         '.[$series].development[$tool] == ($helper[0][$series].development[$tool] + {sha256:$sha})' versions.json >/dev/null
 done < <(jq -r --arg series "$series" '.[$series].development | keys[]' versions-helper.json)
 
+test_case="remove a release from metadata while preserving historical files"
 retired="$(jq -r --arg series "$series" '"\($series)/alpha/php\(.[$series].php)/\(.[$series].variant)"' versions-helper.json)"
 mkdir -p "$retired"
 printf 'keep\n' > "$retired/manual.txt"
@@ -139,11 +151,13 @@ edit_helper 'del(.[$series].states.alpha)'
 jq -e --arg series "$series" '.[$series].states | has("alpha") | not' versions.json >/dev/null
 [[ "$(cat "$retired/manual.txt")" == keep ]]
 
+test_case="derive custom package hashes from downloaded bytes"
 # Custom packages also produce hashes automatically from the downloaded bytes.
 edit_helper '.[$series].states.stable.package = "https://example.test/joomla.tar.zst"'
 ./versions.sh "$series/stable"
 jq -e --arg series "$series" --arg sha "$FIXTURE_SHA512" \
     '.[$series].states.stable | .package == "https://example.test/joomla.tar.zst" and .sha512 == $sha' versions.json >/dev/null
+test_case="reuse legacy package hashes while resolving missing tool hashes"
 # A legacy package cache is reused while missing tool hashes are first resolved.
 jq --arg series "$series" '{($series): (.[$series] | .states = {stable: .states.stable})}' versions-helper.json > "$work/helper.json"
 mv "$work/helper.json" versions-helper.json

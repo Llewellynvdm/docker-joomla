@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Exercise a built image. Usage: tests/test-images.sh IMAGE VARIANT DEVELOPMENT
 set -Eeuo pipefail
+test_case='runtime test setup'
+trap 'echo "FAIL: $test_case (${BASH_SOURCE[0]}:$LINENO)" >&2' ERR
 
 image=${1:?image is required}
 variant=${2:?base variant is required}
@@ -24,6 +26,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
+test_case="PHP and Joomla files in $image"
 docker run --rm "$image" php --version 2>"$tmp/php-stderr"
 test ! -s "$tmp/php-stderr"
 docker run --rm "$image" php -r '
@@ -34,11 +37,13 @@ if (!is_file("/usr/src/joomla/cli/joomla.php")) { exit(1); }
 '
 
 if [[ "$development" == false ]]; then
+  test_case="normal image excludes development tools: $image"
   docker run --rm "$image" php -r 'exit(extension_loaded("xdebug") ? 1 : 0);'
   docker run --rm "$image" sh -ec '! command -v composer'
   exit 0
 fi
 
+test_case="Xdebug defaults and mode overrides in $image"
 docker run --rm "$image" php -r '
 if (!extension_loaded("xdebug") || ini_get("xdebug.start_with_request") !== "trigger"
     || ini_get("xdebug.discover_client_host") || getenv("XDEBUG_CONFIG") !== false
@@ -49,6 +54,7 @@ docker run --rm -e XDEBUG_MODE=coverage "$image" php -r '
 if (!in_array("coverage", xdebug_info("mode"), true)) { exit(1); }
 xdebug_start_code_coverage(); xdebug_stop_code_coverage();
 '
+test_case="Composer runs as the web user in $image"
 docker run --rm --user www-data -e COMPOSER_HOME=/tmp/composer-home "$image" sh -ec '
   composer --version
   cache=$(composer config --global cache-dir)
@@ -57,6 +63,7 @@ docker run --rm --user www-data -e COMPOSER_HOME=/tmp/composer-home "$image" sh 
   rm "$cache/write-test"
 '
 # Run a local npm project as the web user, with no registry or host tools needed.
+test_case="development tools and offline npm build in $image"
 docker run --rm --user www-data -e npm_config_cache=/tmp/npm-cache "$image" sh -ec '
   for tool in git ssh patch zip unzip node npm npx python3 make g++ mariadb psql sqlite3 jq rsync less nano; do
     command -v "$tool" >/dev/null
@@ -148,6 +155,7 @@ assert_debug_session() {
   docker logs "$listener" | grep -q '^DBGP_OK$'
 }
 
+test_case="CLI debug connection and trigger in $image"
 start_listener 19003
 # Without a trigger the script must finish while the listener is still waiting.
 docker run --rm --network "$network" -e "JOOMLA_XDEBUG_CLIENT_HOST=$listener" \
@@ -159,6 +167,7 @@ docker run --rm --network "$network" -e "JOOMLA_XDEBUG_CLIENT_HOST=$listener" \
   "$image" php -r 'echo "cli-with-trigger\n";'
 assert_debug_session
 
+test_case="web debug connection and trigger in $image ($variant)"
 start_listener
 if [[ "$variant" == apache ]]; then
   server=apache2-foreground

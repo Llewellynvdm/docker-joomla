@@ -39,7 +39,7 @@ jobs:
           ./apply-templates.sh
           find "${contexts[@]}" -type f -print0 | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/after.sha256"
           cmp "$RUNNER_TEMP/before.sha256" "$RUNNER_TEMP/after.sha256"
-          matrix=$(jq -c '{include: map({directory, variant, development, image: ("joomla:" + .tags[0])})}' "$RUNNER_TEMP/contexts.json")
+          matrix=$(jq -c '{include: map({directory, variant, development, latest: (.tags | index("latest") != null), image: ("joomla:" + .tags[0])})}' "$RUNNER_TEMP/contexts.json")
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           jq -j '.[] | .directory + "\u0000"' "$RUNNER_TEMP/contexts.json" > "$RUNNER_TEMP/context-paths"
           tar -czf "$RUNNER_TEMP/generated-contexts.tar.gz" --null -T "$RUNNER_TEMP/context-paths" versions.json
@@ -87,6 +87,13 @@ jobs:
           VARIANT: ${{ matrix.variant }}
           DEVELOPMENT: ${{ matrix.development }}
         run: ./tests/test-images.sh "$IMAGE" "$VARIANT" "$DEVELOPMENT"
+      - name: Install and serve latest Joomla
+        if: matrix.latest
+        timeout-minutes: 10
+        env:
+          IMAGE: ${{ matrix.image }}
+          VARIANT: ${{ matrix.variant }}
+        run: ./tests/test-joomla.sh "$IMAGE" "$VARIANT"
       - name: Image history
         if: always()
         env:

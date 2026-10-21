@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+test_case="manifest test setup"
+trap 'echo "FAIL: $test_case (${BASH_SOURCE[0]}:$LINENO)" >&2' ERR
 repository="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 temporary="$(mktemp -d)"
 trap 'rm -rf "$temporary"' EXIT
@@ -38,6 +40,7 @@ git config user.email 'manifest-fixture@example.test'
 git add .
 git commit -qm 'Create manifest fixture'
 
+test_case="manifest tags and directories match the publication plan"
 ./generate-stackbrew-library.sh >"$temporary/manifest"
 jq -r '.[] | "Tags: " + (.tags | join(", "))' "$temporary/plan.json" >"$temporary/expected-tags"
 grep '^Tags:' "$temporary/manifest" >"$temporary/actual-tags"
@@ -45,9 +48,11 @@ cmp "$temporary/expected-tags" "$temporary/actual-tags"
 jq -r '.[] | "Directory: " + .directory' "$temporary/plan.json" >"$temporary/expected-paths"
 grep '^Directory:' "$temporary/manifest" >"$temporary/actual-paths"
 cmp "$temporary/expected-paths" "$temporary/actual-paths"
+test_case="discover architectures once per parent image"
 [[ "$(wc -l <"$BASHBREW_TEST_LOG")" == "$(sort -u "$temporary/parents" | wc -l)" ]]
 grep -q '^Architectures: amd64, arm64v8$' "$temporary/manifest"
 
+test_case="selected track honors repository and ref overrides"
 # Select a configured track, regardless of whether it is stable or a prerelease.
 selector="$(jq -r '.[0] | .series + "/" + .state' "$temporary/plan.json")"
 directory="$(jq -r '.[0].directory' "$temporary/plan.json")"
@@ -61,11 +66,17 @@ grep -q '^GitFetch: refs/heads/test$' "$temporary/selected"
 
 reject() {
   local diagnostic="$1"; shift
+  test_case="reject invalid manifest input: $diagnostic"
   if ./generate-stackbrew-library.sh "$@" >"$temporary/output" 2>"$temporary/error"; then
     printf 'FAIL: expected manifest error: %s\n' "$diagnostic" >&2; exit 1
   fi
-  [[ ! -s "$temporary/output" ]]
-  grep -Fq "$diagnostic" "$temporary/error"
+  if [[ -s "$temporary/output" ]]; then
+    echo "FAIL: invalid input produced a partial manifest: $diagnostic" >&2; exit 1
+  fi
+  if ! grep -Fq "$diagnostic" "$temporary/error"; then
+    echo "FAIL: expected diagnostic: $diagnostic; actual error follows" >&2
+    cat "$temporary/error" >&2; exit 1
+  fi
 }
 reject 'unknown release selector' unconfigured
 mv "$directory/Dockerfile" "$temporary/Dockerfile"
@@ -75,6 +86,7 @@ printf '; changed\n' >>"$directory/runtime.ini"
 reject 'uncommitted changes'
 git add "$directory/runtime.ini"
 git commit -qm 'Change a copied runtime file'
+test_case="a changed copied file updates the context GitCommit"
 ./generate-stackbrew-library.sh "$selector" >"$temporary/copied-file"
 jq -ne --arg text "$(cat "$temporary/copied-file")" --arg commit "$(git rev-parse HEAD)" --arg directory "$directory" \
   '$text | contains("GitCommit: " + $commit + "\nDirectory: " + $directory)' >/dev/null
