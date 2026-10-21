@@ -60,6 +60,7 @@ docker run --rm --user www-data -e COMPOSER_HOME=/tmp/composer-home "$image" sh 
   ! command -v pie
   test ! -e /tmp/pie
   test ! -d /tmp/joomla-pie
+  test ! -d /tmp/joomla-npm
   cache=$(composer config --global cache-dir)
   mkdir -p "$cache"
   touch "$cache/write-test"
@@ -72,6 +73,9 @@ docker run --rm --user www-data -e npm_config_cache=/tmp/npm-cache "$image" sh -
     command -v "$tool" >/dev/null
   done
   test "$(npx --version)" = "$(npm --version)"
+  test "$(command -v npm)" = /usr/local/bin/npm
+  test "$(command -v npx)" = /usr/local/bin/npx
+  test ! -e /usr/bin/npm
   project=$(mktemp -d)
   mkdir -p "$npm_config_cache"
   cd "$project"

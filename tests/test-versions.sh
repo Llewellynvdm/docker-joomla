@@ -37,10 +37,9 @@ while (($#)); do
 done
 printf '%s\n' "$url" >> "$FIXTURE_CALLS"
 [[ "${FIXTURE_FAILURE:-}" != http ]] || exit 22
-if [[ "${FIXTURE_FAILURE:-}" == connection && "$url" == https://github.com/xdebug/xdebug/* ]]; then exit 7; fi
+[[ "${FIXTURE_FAILURE:-}" != connection ]] || exit 7
 if [[ "${FIXTURE_FAILURE:-}" == pie && "$url" == https://github.com/php/pie/* ]]; then exit 22; fi
 if [[ "${FIXTURE_FAILURE:-}" == tool && "$url" != https://*github.com/* ]]; then exit 22; fi
-if [[ "${FIXTURE_FAILURE:-}" == npm && "$url" == https://registry.npmjs.org/* ]]; then exit 22; fi
 if [[ "$url" == https://api.github.com/* ]]; then
     version="${url##*/}"
     case "$version" in
@@ -81,7 +80,7 @@ test_case="resolve every configured artifact and reuse URL-keyed checksums"
 ./versions.sh --force
 jq -e --arg sha "$FIXTURE_SHA256" --arg sha512 "$FIXTURE_SHA512" '
   all(.[]; all(.states[]; .sha512 == $sha512))
-  and all(.. | objects | select(has("destination") or has("extension")); .sha256 == $sha)
+  and all(.. | objects | select(has("destination")); .sha256 == $sha)
 ' versions.json >/dev/null
 before="$(wc -l < "$FIXTURE_CALLS")"
 ./versions.sh
@@ -93,6 +92,15 @@ jq 'map_values(.phpVersions |= map_values(.environment.TEST_SETTING = "configure
 [[ "$(wc -l < "$FIXTURE_CALLS")" == "$before" ]]
 jq -e 'all(.[]; all(.phpVersions[]; .environment.TEST_SETTING == "configured"))' versions.json >/dev/null
 mv .versions-helper.json versions-helper.json
+
+test_case="installer version changes do not resolve source downloads"
+jq 'walk(if type == "object" then
+    (if has("pie") and (.pie | type == "object") and (.pie | has("type") | not) then .pie |= map_values("100.0.0") else . end)
+    | (if has("npm") and (.npm | type == "object") then .npm |= map_values("100.0.0") else . end)
+  else . end)' versions-helper.json > "$work/helper"
+mv "$work/helper" versions-helper.json
+./versions.sh
+[[ "$(wc -l < "$FIXTURE_CALLS")" == "$before" ]]
 
 test_case="new arbitrary download needs no resolver code"
 jq 'to_entries[0].key' versions-helper.json > "$work/series"
@@ -113,7 +121,7 @@ mv "$work/helper" versions-helper.json
 ./versions.sh
 [[ "$(wc -l < "$FIXTURE_CALLS")" == "$((before + 2))" ]]
 
-for failure in http connection missing duplicate digest checksum tool pie npm composer-digest composer-checksum; do
+for failure in http connection missing duplicate digest checksum tool pie composer-digest composer-checksum; do
     test_case="failed $failure resolution leaves existing versions.json untouched"
     cp versions.json "$work/baseline.json"
     if env FIXTURE_FAILURE="$failure" ./versions.sh --force >"$work/error" 2>&1; then

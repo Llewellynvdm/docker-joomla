@@ -17,27 +17,23 @@ def image_config:
   | reduce ["apt", "apk"][] as $manager (.;
       if .[$manager] != null then require(.[$manager] | type == "array" and all(.[]; safe_name); "invalid system package list") else . end
       | if .build[$manager] != null then require(.build[$manager] | type == "array" and all(.[]; safe_name); "invalid build package list") else . end)
-  | reduce ["pie", "pecl"][] as $installer (.;
+  | require(has("sources") | not; "installer packages do not need sources; use pinned package maps")
+  | reduce ["pie", "pecl", "npm"][] as $installer (.;
       if .[$installer] != null then
         require(.[$installer] | type == "object"; "installer group must be an object")
         | .[$installer] as $packages
         | reduce ($packages | keys[]) as $name (.;
             require($name | safe_name; "invalid extension package name")
-            | require($packages[$name] | version_number; "invalid extension version")
-            | require(.sources[$name].package | https; "extension requires an explicit HTTPS archive URL")
-            | require(.sources[$name].extension | safe_name; "invalid extension module")
-            | require(.sources[$name].ini | safe_name; "invalid extension INI name")
-            | if $mode == "resolved" then require(.sources[$name].sha256 | sha256; "missing extension checksum") else . end)
+            | require($packages[$name] | version_number; "invalid package version"))
       else . end)
   | require(([.pie // {} | keys[]] + [.pecl // {} | keys[]] | length) == ([.pie // {} | keys[]] + [.pecl // {} | keys[]] | unique | length); "duplicate installer ownership")
-  | require(([.sources // {} | .[].extension] | length) == ([.sources // {} | .[].extension] | unique | length); "duplicate extension module")
   | if .download != null then .download |= with_entries(
       require(.key | safe_name; "invalid download name")
       | .value |= (
           require(.version | version_number; "invalid download version")
           | require(.package | https; "download requires an explicit HTTPS URL")
           | require(.destination | absolute_path; "invalid download destination")
-          | require(.type | IN("binary", "tar.gz", "node-package"); "unsupported download installation type")
+          | require(.type | IN("binary", "tar.gz"); "unsupported download installation type")
           | if .checksum != null then require(.checksum | https; "invalid published checksum URL") else . end
           | if $mode == "resolved" then require(.sha256 | sha256; "missing download checksum") else . end)) else . end
   | if .config != null then require(.config | type == "object" and all(to_entries[]; (.key | absolute_path) and (.value | type == "array" and all(.[]; type == "string" and (contains("\n") | not)))); "invalid configuration file") else . end
@@ -79,11 +75,9 @@ require(type == "object" and length > 0; "configuration must contain at least on
                     | require(.command | type == "array" and length > 0 and all(.[]; type == "string"); "invalid runtime command")
                   )
                 | if .dev != null then .dev |= image_config else . end
-                | . as $base
                 | ((.pie // {}) + (.dev.pie // {})) as $pie
                 | ((.pecl // {}) + (.dev.pecl // {})) as $pecl
                 | require(all($pie | keys[]; . as $name | ($pecl | has($name) | not)); "duplicate installer ownership across dev settings")
-                | require(([$pie | keys[]] + [$pecl | keys[]] | map($base.sources[.] // $base.dev.sources[.]) | map(.extension) | length) == ([$pie | keys[]] + [$pecl | keys[]] | map($base.sources[.] // $base.dev.sources[.]) | map(.extension) | unique | length); "duplicate extension module across dev settings")
                 | if ($pie | length) > 0 then
                     require(.download.pie.type == "binary" and .download.pie.temporary == true; "PIE must be a temporary binary download")
                   else . end

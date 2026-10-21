@@ -153,7 +153,7 @@ while IFS=$'\t' read -r series path package checksumUrl; do
     fi
     jq --argjson path "$path" --arg sha256 "${artifactHashes[$key]}" 'setpath($path + ["sha256"]; $sha256)' "$work/result.json" > "$work/next.json"
     mv "$work/next.json" "$work/result.json"
-done < <(jq -r 'paths(objects) as $path | getpath($path) | select(has("destination") or has("extension")) | select(has("package")) | [$path[0], ($path | tojson), .package, (.checksum // "-")] | @tsv' "$work/helper.json")
+done < <(jq -r 'paths(objects) as $path | select($path[-2] == "download") | getpath($path) | [$path[0], ($path | tojson), .package, (.checksum // "-")] | @tsv' "$work/helper.json")
 
 jq --arg mode resolved -S -f scripts/validate-config.jq "$work/result.json" > "$work/versions.json"
 mv "$work/versions.json" versions.json

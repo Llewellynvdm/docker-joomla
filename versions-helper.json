@@ -19,28 +19,6 @@
           "php-memcached/php-memcached": "3.4.0",
           "phpredis/phpredis": "6.3.0"
         },
-        "sources": {
-          "imagick/imagick": {
-            "package": "https://github.com/Imagick/imagick/archive/refs/tags/3.8.1.tar.gz",
-            "extension": "imagick",
-            "ini": "docker-php-ext-imagick.ini"
-          },
-          "apcu/apcu": {
-            "package": "https://github.com/krakjoe/apcu/archive/refs/tags/v5.1.28.tar.gz",
-            "extension": "apcu",
-            "ini": "docker-php-ext-apcu.ini"
-          },
-          "php-memcached/php-memcached": {
-            "package": "https://github.com/php-memcached-dev/php-memcached/archive/refs/tags/v3.4.0.tar.gz",
-            "extension": "memcached",
-            "ini": "docker-php-ext-memcached.ini"
-          },
-          "phpredis/phpredis": {
-            "package": "https://github.com/phpredis/phpredis/archive/refs/tags/6.3.0.tar.gz",
-            "extension": "redis",
-            "ini": "docker-php-ext-redis.ini"
-          }
-        },
         "apt": [
           "ghostscript"
         ],
@@ -206,27 +184,10 @@
               "checksum": "https://getcomposer.org/download/2.10.3/composer.phar.sha256sum",
               "type": "binary",
               "destination": "/usr/local/bin/composer"
-            },
-            "npm": {
-              "version": "11.21.1",
-              "package": "https://registry.npmjs.org/npm/-/npm-11.21.1.tgz",
-              "type": "node-package",
-              "destination": "/usr/local/lib/node_modules/npm",
-              "links": {
-                "/usr/local/bin/npm": "/usr/local/lib/node_modules/npm/bin/npm-cli.js",
-                "/usr/local/bin/npx": "/usr/local/lib/node_modules/npm/bin/npx-cli.js"
-              }
             }
           },
           "pie": {
             "xdebug/xdebug": "3.5.3"
-          },
-          "sources": {
-            "xdebug/xdebug": {
-              "package": "https://github.com/xdebug/xdebug/archive/refs/tags/3.5.3.tar.gz",
-              "extension": "xdebug",
-              "ini": "zz-xdebug.ini"
-            }
           },
           "apt": [
             "git",
@@ -291,6 +252,17 @@
               "xdebug.client_port = ${JOOMLA_XDEBUG_CLIENT_PORT}",
               "xdebug.output_dir = /tmp"
             ]
+          },
+          "npm": {
+            "npm": "11.21.1"
+          },
+          "build": {
+            "apt": [
+              "npm"
+            ],
+            "apk": [
+              "npm"
+            ]
           }
         },
         "volume": [
@@ -316,28 +288,6 @@
           "apcu/apcu": "5.1.28",
           "php-memcached/php-memcached": "3.4.0",
           "phpredis/phpredis": "6.3.0"
-        },
-        "sources": {
-          "imagick/imagick": {
-            "package": "https://github.com/Imagick/imagick/archive/refs/tags/3.8.1.tar.gz",
-            "extension": "imagick",
-            "ini": "docker-php-ext-imagick.ini"
-          },
-          "apcu/apcu": {
-            "package": "https://github.com/krakjoe/apcu/archive/refs/tags/v5.1.28.tar.gz",
-            "extension": "apcu",
-            "ini": "docker-php-ext-apcu.ini"
-          },
-          "php-memcached/php-memcached": {
-            "package": "https://github.com/php-memcached-dev/php-memcached/archive/refs/tags/v3.4.0.tar.gz",
-            "extension": "memcached",
-            "ini": "docker-php-ext-memcached.ini"
-          },
-          "phpredis/phpredis": {
-            "package": "https://github.com/phpredis/phpredis/archive/refs/tags/6.3.0.tar.gz",
-            "extension": "redis",
-            "ini": "docker-php-ext-redis.ini"
-          }
         },
         "apt": [
           "ghostscript"
@@ -506,27 +456,10 @@
               "checksum": "https://getcomposer.org/download/2.10.3/composer.phar.sha256sum",
               "type": "binary",
               "destination": "/usr/local/bin/composer"
-            },
-            "npm": {
-              "version": "11.21.1",
-              "package": "https://registry.npmjs.org/npm/-/npm-11.21.1.tgz",
-              "type": "node-package",
-              "destination": "/usr/local/lib/node_modules/npm",
-              "links": {
-                "/usr/local/bin/npm": "/usr/local/lib/node_modules/npm/bin/npm-cli.js",
-                "/usr/local/bin/npx": "/usr/local/lib/node_modules/npm/bin/npx-cli.js"
-              }
             }
           },
           "pie": {
             "xdebug/xdebug": "3.5.3"
-          },
-          "sources": {
-            "xdebug/xdebug": {
-              "package": "https://github.com/xdebug/xdebug/archive/refs/tags/3.5.3.tar.gz",
-              "extension": "xdebug",
-              "ini": "zz-xdebug.ini"
-            }
           },
           "apt": [
             "git",
@@ -591,6 +524,17 @@
               "xdebug.client_port = ${JOOMLA_XDEBUG_CLIENT_PORT}",
               "xdebug.output_dir = /tmp"
             ]
+          },
+          "npm": {
+            "npm": "11.21.1"
+          },
+          "build": {
+            "apt": [
+              "npm"
+            ],
+            "apk": [
+              "npm"
+            ]
           }
         },
         "volume": [
@@ -616,28 +560,6 @@
           "apcu/apcu": "5.1.27",
           "php-memcached/php-memcached": "3.4.0",
           "phpredis/phpredis": "6.3.0"
-        },
-        "sources": {
-          "imagick/imagick": {
-            "package": "https://github.com/Imagick/imagick/archive/refs/tags/3.8.0.tar.gz",
-            "extension": "imagick",
-            "ini": "docker-php-ext-imagick.ini"
-          },
-          "apcu/apcu": {
-            "package": "https://github.com/krakjoe/apcu/archive/refs/tags/v5.1.27.tar.gz",
-            "extension": "apcu",
-            "ini": "docker-php-ext-apcu.ini"
-          },
-          "php-memcached/php-memcached": {
-            "package": "https://github.com/php-memcached-dev/php-memcached/archive/refs/tags/v3.4.0.tar.gz",
-            "extension": "memcached",
-            "ini": "docker-php-ext-memcached.ini"
-          },
-          "phpredis/phpredis": {
-            "package": "https://github.com/phpredis/phpredis/archive/refs/tags/6.3.0.tar.gz",
-            "extension": "redis",
-            "ini": "docker-php-ext-redis.ini"
-          }
         },
         "apt": [
           "ghostscript"
@@ -806,27 +728,10 @@
               "checksum": "https://getcomposer.org/download/2.10.3/composer.phar.sha256sum",
               "type": "binary",
               "destination": "/usr/local/bin/composer"
-            },
-            "npm": {
-              "version": "11.21.1",
-              "package": "https://registry.npmjs.org/npm/-/npm-11.21.1.tgz",
-              "type": "node-package",
-              "destination": "/usr/local/lib/node_modules/npm",
-              "links": {
-                "/usr/local/bin/npm": "/usr/local/lib/node_modules/npm/bin/npm-cli.js",
-                "/usr/local/bin/npx": "/usr/local/lib/node_modules/npm/bin/npx-cli.js"
-              }
             }
           },
           "pie": {
             "xdebug/xdebug": "3.5.3"
-          },
-          "sources": {
-            "xdebug/xdebug": {
-              "package": "https://github.com/xdebug/xdebug/archive/refs/tags/3.5.3.tar.gz",
-              "extension": "xdebug",
-              "ini": "zz-xdebug.ini"
-            }
           },
           "apt": [
             "git",
@@ -891,6 +796,17 @@
               "xdebug.client_port = ${JOOMLA_XDEBUG_CLIENT_PORT}",
               "xdebug.output_dir = /tmp"
             ]
+          },
+          "npm": {
+            "npm": "11.21.1"
+          },
+          "build": {
+            "apt": [
+              "npm"
+            ],
+            "apk": [
+              "npm"
+            ]
           }
         },
         "volume": [
@@ -939,28 +855,6 @@
           "apcu/apcu": "5.1.27",
           "php-memcached/php-memcached": "3.4.0",
           "phpredis/phpredis": "6.3.0"
-        },
-        "sources": {
-          "imagick/imagick": {
-            "package": "https://github.com/Imagick/imagick/archive/refs/tags/3.8.0.tar.gz",
-            "extension": "imagick",
-            "ini": "docker-php-ext-imagick.ini"
-          },
-          "apcu/apcu": {
-            "package": "https://github.com/krakjoe/apcu/archive/refs/tags/v5.1.27.tar.gz",
-            "extension": "apcu",
-            "ini": "docker-php-ext-apcu.ini"
-          },
-          "php-memcached/php-memcached": {
-            "package": "https://github.com/php-memcached-dev/php-memcached/archive/refs/tags/v3.4.0.tar.gz",
-            "extension": "memcached",
-            "ini": "docker-php-ext-memcached.ini"
-          },
-          "phpredis/phpredis": {
-            "package": "https://github.com/phpredis/phpredis/archive/refs/tags/6.3.0.tar.gz",
-            "extension": "redis",
-            "ini": "docker-php-ext-redis.ini"
-          }
         },
         "apt": [
           "ghostscript"
@@ -1144,28 +1038,6 @@
           "apcu/apcu": "5.1.26",
           "php-memcached/php-memcached": "3.3.0",
           "phpredis/phpredis": "6.2.0"
-        },
-        "sources": {
-          "imagick/imagick": {
-            "package": "https://github.com/Imagick/imagick/archive/refs/tags/3.8.0.tar.gz",
-            "extension": "imagick",
-            "ini": "docker-php-ext-imagick.ini"
-          },
-          "apcu/apcu": {
-            "package": "https://github.com/krakjoe/apcu/archive/refs/tags/v5.1.26.tar.gz",
-            "extension": "apcu",
-            "ini": "docker-php-ext-apcu.ini"
-          },
-          "php-memcached/php-memcached": {
-            "package": "https://github.com/php-memcached-dev/php-memcached/archive/refs/tags/v3.3.0.tar.gz",
-            "extension": "memcached",
-            "ini": "docker-php-ext-memcached.ini"
-          },
-          "phpredis/phpredis": {
-            "package": "https://github.com/phpredis/phpredis/archive/refs/tags/6.2.0.tar.gz",
-            "extension": "redis",
-            "ini": "docker-php-ext-redis.ini"
-          }
         },
         "apt": [
           "ghostscript"

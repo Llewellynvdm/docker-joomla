@@ -12,66 +12,25 @@ ENV JOOMLA_SHA512=5d61beed1b2ced52ee96b312d327e8f3616cdd93e5d4a759bef9bc0cee3842
 
 RUN set -eux; \
 	apk add --no-cache bash ghostscript imagemagick git openssh-client patch unzip zip zlib nodejs python3 make g++ jq rsync less nano; \
-	apk add --no-cache --virtual .build-deps $PHPIZE_DEPS autoconf bzip2-dev gmp-dev icu-dev freetype-dev imagemagick-dev libjpeg-turbo-dev libmemcached-dev libpng-dev libwebp-dev libzip-dev openldap-dev pcre-dev postgresql-dev automake libtool linux-headers zlib-dev unzip zstd; \
+	apk add --no-cache --virtual .build-deps $PHPIZE_DEPS autoconf bzip2-dev gmp-dev icu-dev freetype-dev imagemagick-dev libjpeg-turbo-dev libmemcached-dev libpng-dev libwebp-dev libzip-dev openldap-dev pcre-dev postgresql-dev automake libtool linux-headers zlib-dev unzip zstd npm; \
 	docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp; \
 	docker-php-ext-configure ldap ; \
 	docker-php-ext-install -j "$(nproc)" bz2 bcmath exif gd gmp intl ldap mysqli pdo_mysql pdo_pgsql pgsql zip pcntl sockets; \
-	docker-php-ext-enable opcache; \
 	curl --fail --show-error --silent --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 300 --proto '=https' --proto-redir '=https' https://github.com/php/pie/releases/download/1.5.2/pie.phar -o /tmp/pie; \
 	echo 'fe70c59738cf56ec00a818cf9cb9593da171aac86f5f1f859995b8839dfd2cc7  /tmp/pie' | sha256sum -c -; \
 	chmod 0755 /tmp/pie; \
 	curl --fail --show-error --silent --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 300 --proto '=https' --proto-redir '=https' https://getcomposer.org/download/2.10.3/composer.phar -o /usr/local/bin/composer; \
 	echo '7a2d379d5b8ffdaa028580ef26494c36d2feef4b178d3dd1473a4dbc5e17c8d6  /usr/local/bin/composer' | sha256sum -c -; \
 	chmod 0755 /usr/local/bin/composer; \
-	curl --fail --show-error --silent --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 300 --proto '=https' --proto-redir '=https' https://registry.npmjs.org/npm/-/npm-11.21.1.tgz -o /tmp/download-npm; \
-	echo 'dd77c48eb845f4856c2cdba347cfb52bd877a2655a1ea48ff0c4796e3df9dd7b  /tmp/download-npm' | sha256sum -c -; \
-	mkdir -p /usr/local/lib/node_modules/npm; \
-	tar -xzf /tmp/download-npm -C /usr/local/lib/node_modules/npm --strip-components=1 --no-same-owner; \
-	rm -f /tmp/download-npm; \
-	node -e 'const path = "/usr/local/lib/node_modules/npm"; const pkg = require(path + "/package.json"); const semver = require(path + "/node_modules/semver"); if (!semver.satisfies(process.version, pkg.engines.node)) { throw new Error("Incompatible Node.js: " + process.version + " requires " + pkg.engines.node); }'; \
-	ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm; \
-	ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx; \
-	curl --fail --show-error --silent --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 300 --proto '=https' --proto-redir '=https' https://github.com/krakjoe/apcu/archive/refs/tags/v5.1.28.tar.gz -o /tmp/extension-apcu.tgz; \
-	echo '0e60ba9d0fa4021c57a70c071f3d8f71de236275d084e560d5959fec4edd8c32  /tmp/extension-apcu.tgz' | sha256sum -c -; \
-	mkdir -p /tmp/extension-apcu; \
-	tar -xzf /tmp/extension-apcu.tgz -C /tmp/extension-apcu --strip-components=1 --no-same-owner; \
-	PIE_WORKING_DIRECTORY=/tmp/joomla-pie /tmp/pie install --no-interaction --no-cache --working-dir=/tmp/extension-apcu --skip-enable-extension --make-parallel-jobs="$(nproc)"; \
-	docker-php-ext-enable --ini-name docker-php-ext-apcu.ini apcu; \
-	php -r 'exit(phpversion("apcu") === "5.1.28" ? 0 : 1);'; \
-	rm -rf /tmp/extension-apcu /tmp/extension-apcu.tgz; \
-	curl --fail --show-error --silent --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 300 --proto '=https' --proto-redir '=https' https://github.com/Imagick/imagick/archive/refs/tags/3.8.1.tar.gz -o /tmp/extension-imagick.tgz; \
-	echo 'b0e9279ddf6e75a8c6b4068e16daec0475427dbca7ce2e144e30a51a88aa5ddc  /tmp/extension-imagick.tgz' | sha256sum -c -; \
-	mkdir -p /tmp/extension-imagick; \
-	tar -xzf /tmp/extension-imagick.tgz -C /tmp/extension-imagick --strip-components=1 --no-same-owner; \
-	PIE_WORKING_DIRECTORY=/tmp/joomla-pie /tmp/pie install --no-interaction --no-cache --working-dir=/tmp/extension-imagick --skip-enable-extension --make-parallel-jobs="$(nproc)"; \
-	docker-php-ext-enable --ini-name docker-php-ext-imagick.ini imagick; \
-	php -r 'exit(phpversion("imagick") === "3.8.1" ? 0 : 1);'; \
-	rm -rf /tmp/extension-imagick /tmp/extension-imagick.tgz; \
-	curl --fail --show-error --silent --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 300 --proto '=https' --proto-redir '=https' https://github.com/php-memcached-dev/php-memcached/archive/refs/tags/v3.4.0.tar.gz -o /tmp/extension-memcached.tgz; \
-	echo '10b98a0fdc3ce9ab823db59e8935f068de87e374728871a1efacdadd8c7807d1  /tmp/extension-memcached.tgz' | sha256sum -c -; \
-	mkdir -p /tmp/extension-memcached; \
-	tar -xzf /tmp/extension-memcached.tgz -C /tmp/extension-memcached --strip-components=1 --no-same-owner; \
-	PIE_WORKING_DIRECTORY=/tmp/joomla-pie /tmp/pie install --no-interaction --no-cache --working-dir=/tmp/extension-memcached --skip-enable-extension --make-parallel-jobs="$(nproc)"; \
-	docker-php-ext-enable --ini-name docker-php-ext-memcached.ini memcached; \
-	php -r 'exit(phpversion("memcached") === "3.4.0" ? 0 : 1);'; \
-	rm -rf /tmp/extension-memcached /tmp/extension-memcached.tgz; \
-	curl --fail --show-error --silent --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 300 --proto '=https' --proto-redir '=https' https://github.com/phpredis/phpredis/archive/refs/tags/6.3.0.tar.gz -o /tmp/extension-redis.tgz; \
-	echo 'cb8f81df1a275599e4f8ddcfec7e1f65ed1953e6f5673649149fd680ebff4cad  /tmp/extension-redis.tgz' | sha256sum -c -; \
-	mkdir -p /tmp/extension-redis; \
-	tar -xzf /tmp/extension-redis.tgz -C /tmp/extension-redis --strip-components=1 --no-same-owner; \
-	PIE_WORKING_DIRECTORY=/tmp/joomla-pie /tmp/pie install --no-interaction --no-cache --working-dir=/tmp/extension-redis --skip-enable-extension --make-parallel-jobs="$(nproc)"; \
-	docker-php-ext-enable --ini-name docker-php-ext-redis.ini redis; \
-	php -r 'exit(phpversion("redis") === "6.3.0" ? 0 : 1);'; \
-	rm -rf /tmp/extension-redis /tmp/extension-redis.tgz; \
-	curl --fail --show-error --silent --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 300 --proto '=https' --proto-redir '=https' https://github.com/xdebug/xdebug/archive/refs/tags/3.5.3.tar.gz -o /tmp/extension-xdebug.tgz; \
-	echo '954e56021668121ecc50b92d2ad1ce945f22ecf81ffc5bb5835219485b12ef5f  /tmp/extension-xdebug.tgz' | sha256sum -c -; \
-	mkdir -p /tmp/extension-xdebug; \
-	tar -xzf /tmp/extension-xdebug.tgz -C /tmp/extension-xdebug --strip-components=1 --no-same-owner; \
-	PIE_WORKING_DIRECTORY=/tmp/joomla-pie /tmp/pie install --no-interaction --no-cache --working-dir=/tmp/extension-xdebug --skip-enable-extension --make-parallel-jobs="$(nproc)"; \
-	docker-php-ext-enable --ini-name zz-xdebug.ini xdebug; \
-	php -r 'exit(phpversion("xdebug") === "3.5.3" ? 0 : 1);'; \
-	rm -rf /tmp/extension-xdebug /tmp/extension-xdebug.tgz; \
-	rm -rf /tmp/pie /tmp/joomla-pie /tmp/pear /root/.cache; \
+	PIE_WORKING_DIRECTORY=/tmp/joomla-pie /tmp/pie install --no-interaction --no-cache --make-parallel-jobs="$(nproc)" apcu/apcu:5.1.28; \
+	PIE_WORKING_DIRECTORY=/tmp/joomla-pie /tmp/pie install --no-interaction --no-cache --make-parallel-jobs="$(nproc)" imagick/imagick:3.8.1; \
+	PIE_WORKING_DIRECTORY=/tmp/joomla-pie /tmp/pie install --no-interaction --no-cache --make-parallel-jobs="$(nproc)" php-memcached/php-memcached:3.4.0; \
+	PIE_WORKING_DIRECTORY=/tmp/joomla-pie /tmp/pie install --no-interaction --no-cache --make-parallel-jobs="$(nproc)" phpredis/phpredis:6.3.0; \
+	PIE_WORKING_DIRECTORY=/tmp/joomla-pie /tmp/pie install --no-interaction --no-cache --make-parallel-jobs="$(nproc)" xdebug/xdebug:3.5.3; \
+	docker-php-ext-enable opcache; \
+	npm_config_cache=/tmp/joomla-npm npm install --global --prefix /usr/local --no-audit --no-fund --engine-strict npm@11.21.1; \
+	hash -r; \
+	rm -rf /tmp/pie /tmp/joomla-pie /tmp/joomla-npm /tmp/pear /root/.cache; \
 	curl --fail --show-error --silent --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 300 --proto '=https' --proto-redir '=https' https://github.com/joomla/joomla-cms/releases/download/6.2.0/Joomla_6.2.0-Stable-Full_Package.tar.zst -o /tmp/joomla.tar.zst; \
 	echo '5d61beed1b2ced52ee96b312d327e8f3616cdd93e5d4a759bef9bc0cee384232a21e3b85e15f659edcdb83fb5ea9969cd009722eeb6151303cc5e6c9d6dc26bc  /tmp/joomla.tar.zst' | sha512sum -c -; \
 	mkdir -p /usr/src/joomla; \

@@ -33,10 +33,14 @@ for context in plan:
     assert 'FROM ' + image['base'] in text, directory
     for item in image['download'].values():
         assert item['package'] in text and item['sha256'] in text, directory
-    for name in image.get('pie', {}):
-        item = image['sources'][name]
-        assert item['package'] in text and item['sha256'] in text, directory
-        assert 'docker-php-ext-enable --ini-name ' + item['ini'] + ' ' + item['extension'] in text, directory
+    for name, version in image.get('pie', {}).items():
+        assert ' ' + name + ':' + version in text, directory
+    for name, version in image.get('npm', {}).items():
+        assert ' ' + name + '@' + version in text, directory
+    assert '--working-dir=/tmp/extension-' not in text, directory
+    assert '--skip-enable-extension' not in text, directory
+    assert '/tmp/extension-' not in text, directory
+    assert text.count('curl --fail') == len(image.get('download', {})) + 1, directory
     for path, lines in image['config'].items():
         assert path in text, directory
         assert all(line in text for line in lines), directory
@@ -72,6 +76,14 @@ assert 'FROM php:100.0-test' in normal
 trial[series]['phpVersions']['100.0'] = copy.deepcopy(entry)
 del trial[series]['phpVersions']['100.0']['dev']
 assert 'sentinel-dev-package' not in r.render(trial, series, next(iter(settings['states'])), '100.0', variant, False, Path('Dockerfile.template').read_text())
+
+# A package without PIE support can use PECL and the PHP image's enable helper.
+entry['pecl'] = {'example': '100.0.0'}
+entry['extensions'].setdefault('enable', []).append('example')
+fallback = r.render(trial, series, next(iter(settings['states'])), php, variant, False, Path('Dockerfile.template').read_text())
+assert 'pecl install example-100.0.0' in fallback
+assert fallback.index('pecl install example-100.0.0') < fallback.index('docker-php-ext-enable ')
+assert '/tmp/extension-' not in fallback
 
 PY
 find . -name Dockerfile -print0 | sort -z | xargs -0 sha256sum >"$work/before"

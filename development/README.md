@@ -18,11 +18,18 @@ Node.js follows the distribution used by the matching PHP base image.
 Packages, download URLs, extension versions and configuration are selected per PHP version in `versions-helper.json`; the update
 scripts resolve their download checksums automatically.
 
-Xdebug is installed with PIE from its official GitHub release tag. `versions.json` records
-the archive URL and SHA256 together, and the Dockerfile uses that exact pair.
-The next update refreshes older Xdebug hashes that have no matching source URL.
+Xdebug and the other external PHP extensions are installed directly through PIE
+using the configured package versions. PIE uses `docker-php-ext-enable` to enable
+them. There are no separate extension archive URLs or hashes to maintain.
 
-PIE is a temporary build tool: it installs verified extension sources without interaction, then is removed with its workspace in the same build layer. The compiled extensions are enabled using `docker-php-ext-enable`. Database command-line clients are optional deployment additions and are not bundled.
+The distribution provides Node.js and a temporary npm bootstrap. That bootstrap
+installs the configured npm release through npm, then is removed. Composer stays
+a direct PHAR download to avoid bringing in a second PHP installation.
+
+PIE and the npm bootstrap, their workspaces and caches are removed in the same
+build layer. Direct downloads, including the PIE and Composer PHARs, have hashes
+generated into `versions.json` and verified during the build. Database command-line
+clients are optional deployment additions and are not bundled.
 
 ## Switch between normal and development images
 

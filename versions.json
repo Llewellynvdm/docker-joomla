@@ -122,32 +122,6 @@
           "php-memcached/php-memcached": "3.3.0",
           "phpredis/phpredis": "6.2.0"
         },
-        "sources": {
-          "apcu/apcu": {
-            "extension": "apcu",
-            "ini": "docker-php-ext-apcu.ini",
-            "package": "https://github.com/krakjoe/apcu/archive/refs/tags/v5.1.26.tar.gz",
-            "sha256": "6b3b01120cd9c90f656c3f509caabcd3c4c10cc2b277f15827a699ca885988e3"
-          },
-          "imagick/imagick": {
-            "extension": "imagick",
-            "ini": "docker-php-ext-imagick.ini",
-            "package": "https://github.com/Imagick/imagick/archive/refs/tags/3.8.0.tar.gz",
-            "sha256": "a964e54a441392577f195d91da56e0b3cf30c32e6d60d0531a355b37bb1e1a59"
-          },
-          "php-memcached/php-memcached": {
-            "extension": "memcached",
-            "ini": "docker-php-ext-memcached.ini",
-            "package": "https://github.com/php-memcached-dev/php-memcached/archive/refs/tags/v3.3.0.tar.gz",
-            "sha256": "91148da098446e620176eb262aebbc99b1fcd1e4813c0c92e1dc24e8328f0dcf"
-          },
-          "phpredis/phpredis": {
-            "extension": "redis",
-            "ini": "docker-php-ext-redis.ini",
-            "package": "https://github.com/phpredis/phpredis/archive/refs/tags/6.2.0.tar.gz",
-            "sha256": "470333b27cbf9485d36b610b81300c06491a6575f22c6801a9cefc55285ed123"
-          }
-        },
         "variants": {
           "apache": {
             "apache": {
@@ -331,32 +305,6 @@
           "imagick/imagick": "3.8.0",
           "php-memcached/php-memcached": "3.4.0",
           "phpredis/phpredis": "6.3.0"
-        },
-        "sources": {
-          "apcu/apcu": {
-            "extension": "apcu",
-            "ini": "docker-php-ext-apcu.ini",
-            "package": "https://github.com/krakjoe/apcu/archive/refs/tags/v5.1.27.tar.gz",
-            "sha256": "c4693ad108f80f4d181ece0d4b583c8cd04c9e34d8046c8d03aeb5eed5809316"
-          },
-          "imagick/imagick": {
-            "extension": "imagick",
-            "ini": "docker-php-ext-imagick.ini",
-            "package": "https://github.com/Imagick/imagick/archive/refs/tags/3.8.0.tar.gz",
-            "sha256": "a964e54a441392577f195d91da56e0b3cf30c32e6d60d0531a355b37bb1e1a59"
-          },
-          "php-memcached/php-memcached": {
-            "extension": "memcached",
-            "ini": "docker-php-ext-memcached.ini",
-            "package": "https://github.com/php-memcached-dev/php-memcached/archive/refs/tags/v3.4.0.tar.gz",
-            "sha256": "10b98a0fdc3ce9ab823db59e8935f068de87e374728871a1efacdadd8c7807d1"
-          },
-          "phpredis/phpredis": {
-            "extension": "redis",
-            "ini": "docker-php-ext-redis.ini",
-            "package": "https://github.com/phpredis/phpredis/archive/refs/tags/6.3.0.tar.gz",
-            "sha256": "cb8f81df1a275599e4f8ddcfec7e1f65ed1953e6f5673649149fd680ebff4cad"
-          }
         },
         "variants": {
           "apache": {
@@ -550,6 +498,14 @@
             "less",
             "nano"
           ],
+          "build": {
+            "apk": [
+              "npm"
+            ],
+            "apt": [
+              "npm"
+            ]
+          },
           "config": {
             "/usr/local/etc/php/conf.d/zz-joomla-development.ini": [
               "error_reporting = E_ALL",
@@ -580,17 +536,6 @@
               "sha256": "7a2d379d5b8ffdaa028580ef26494c36d2feef4b178d3dd1473a4dbc5e17c8d6",
               "type": "binary",
               "version": "2.10.3"
-            },
-            "npm": {
-              "destination": "/usr/local/lib/node_modules/npm",
-              "links": {
-                "/usr/local/bin/npm": "/usr/local/lib/node_modules/npm/bin/npm-cli.js",
-                "/usr/local/bin/npx": "/usr/local/lib/node_modules/npm/bin/npx-cli.js"
-              },
-              "package": "https://registry.npmjs.org/npm/-/npm-11.21.1.tgz",
-              "sha256": "dd77c48eb845f4856c2cdba347cfb52bd877a2655a1ea48ff0c4796e3df9dd7b",
-              "type": "node-package",
-              "version": "11.21.1"
             }
           },
           "environment": {
@@ -604,16 +549,11 @@
               "sockets"
             ]
           },
+          "npm": {
+            "npm": "11.21.1"
+          },
           "pie": {
             "xdebug/xdebug": "3.5.3"
-          },
-          "sources": {
-            "xdebug/xdebug": {
-              "extension": "xdebug",
-              "ini": "zz-xdebug.ini",
-              "package": "https://github.com/xdebug/xdebug/archive/refs/tags/3.5.3.tar.gz",
-              "sha256": "954e56021668121ecc50b92d2ad1ce945f22ecf81ffc5bb5835219485b12ef5f"
-            }
           }
         },
         "download": {
@@ -663,32 +603,6 @@
           "imagick/imagick": "3.8.0",
           "php-memcached/php-memcached": "3.4.0",
           "phpredis/phpredis": "6.3.0"
-        },
-        "sources": {
-          "apcu/apcu": {
-            "extension": "apcu",
-            "ini": "docker-php-ext-apcu.ini",
-            "package": "https://github.com/krakjoe/apcu/archive/refs/tags/v5.1.27.tar.gz",
-            "sha256": "c4693ad108f80f4d181ece0d4b583c8cd04c9e34d8046c8d03aeb5eed5809316"
-          },
-          "imagick/imagick": {
-            "extension": "imagick",
-            "ini": "docker-php-ext-imagick.ini",
-            "package": "https://github.com/Imagick/imagick/archive/refs/tags/3.8.0.tar.gz",
-            "sha256": "a964e54a441392577f195d91da56e0b3cf30c32e6d60d0531a355b37bb1e1a59"
-          },
-          "php-memcached/php-memcached": {
-            "extension": "memcached",
-            "ini": "docker-php-ext-memcached.ini",
-            "package": "https://github.com/php-memcached-dev/php-memcached/archive/refs/tags/v3.4.0.tar.gz",
-            "sha256": "10b98a0fdc3ce9ab823db59e8935f068de87e374728871a1efacdadd8c7807d1"
-          },
-          "phpredis/phpredis": {
-            "extension": "redis",
-            "ini": "docker-php-ext-redis.ini",
-            "package": "https://github.com/phpredis/phpredis/archive/refs/tags/6.3.0.tar.gz",
-            "sha256": "cb8f81df1a275599e4f8ddcfec7e1f65ed1953e6f5673649149fd680ebff4cad"
-          }
         },
         "variants": {
           "apache": {
@@ -858,6 +772,14 @@
             "less",
             "nano"
           ],
+          "build": {
+            "apk": [
+              "npm"
+            ],
+            "apt": [
+              "npm"
+            ]
+          },
           "config": {
             "/usr/local/etc/php/conf.d/zz-joomla-development.ini": [
               "error_reporting = E_ALL",
@@ -888,17 +810,6 @@
               "sha256": "7a2d379d5b8ffdaa028580ef26494c36d2feef4b178d3dd1473a4dbc5e17c8d6",
               "type": "binary",
               "version": "2.10.3"
-            },
-            "npm": {
-              "destination": "/usr/local/lib/node_modules/npm",
-              "links": {
-                "/usr/local/bin/npm": "/usr/local/lib/node_modules/npm/bin/npm-cli.js",
-                "/usr/local/bin/npx": "/usr/local/lib/node_modules/npm/bin/npx-cli.js"
-              },
-              "package": "https://registry.npmjs.org/npm/-/npm-11.21.1.tgz",
-              "sha256": "dd77c48eb845f4856c2cdba347cfb52bd877a2655a1ea48ff0c4796e3df9dd7b",
-              "type": "node-package",
-              "version": "11.21.1"
             }
           },
           "environment": {
@@ -912,16 +823,11 @@
               "sockets"
             ]
           },
+          "npm": {
+            "npm": "11.21.1"
+          },
           "pie": {
             "xdebug/xdebug": "3.5.3"
-          },
-          "sources": {
-            "xdebug/xdebug": {
-              "extension": "xdebug",
-              "ini": "zz-xdebug.ini",
-              "package": "https://github.com/xdebug/xdebug/archive/refs/tags/3.5.3.tar.gz",
-              "sha256": "954e56021668121ecc50b92d2ad1ce945f22ecf81ffc5bb5835219485b12ef5f"
-            }
           }
         },
         "download": {
@@ -971,32 +877,6 @@
           "imagick/imagick": "3.8.1",
           "php-memcached/php-memcached": "3.4.0",
           "phpredis/phpredis": "6.3.0"
-        },
-        "sources": {
-          "apcu/apcu": {
-            "extension": "apcu",
-            "ini": "docker-php-ext-apcu.ini",
-            "package": "https://github.com/krakjoe/apcu/archive/refs/tags/v5.1.28.tar.gz",
-            "sha256": "0e60ba9d0fa4021c57a70c071f3d8f71de236275d084e560d5959fec4edd8c32"
-          },
-          "imagick/imagick": {
-            "extension": "imagick",
-            "ini": "docker-php-ext-imagick.ini",
-            "package": "https://github.com/Imagick/imagick/archive/refs/tags/3.8.1.tar.gz",
-            "sha256": "b0e9279ddf6e75a8c6b4068e16daec0475427dbca7ce2e144e30a51a88aa5ddc"
-          },
-          "php-memcached/php-memcached": {
-            "extension": "memcached",
-            "ini": "docker-php-ext-memcached.ini",
-            "package": "https://github.com/php-memcached-dev/php-memcached/archive/refs/tags/v3.4.0.tar.gz",
-            "sha256": "10b98a0fdc3ce9ab823db59e8935f068de87e374728871a1efacdadd8c7807d1"
-          },
-          "phpredis/phpredis": {
-            "extension": "redis",
-            "ini": "docker-php-ext-redis.ini",
-            "package": "https://github.com/phpredis/phpredis/archive/refs/tags/6.3.0.tar.gz",
-            "sha256": "cb8f81df1a275599e4f8ddcfec7e1f65ed1953e6f5673649149fd680ebff4cad"
-          }
         },
         "variants": {
           "apache": {
@@ -1166,6 +1046,14 @@
             "less",
             "nano"
           ],
+          "build": {
+            "apk": [
+              "npm"
+            ],
+            "apt": [
+              "npm"
+            ]
+          },
           "config": {
             "/usr/local/etc/php/conf.d/zz-joomla-development.ini": [
               "error_reporting = E_ALL",
@@ -1196,17 +1084,6 @@
               "sha256": "7a2d379d5b8ffdaa028580ef26494c36d2feef4b178d3dd1473a4dbc5e17c8d6",
               "type": "binary",
               "version": "2.10.3"
-            },
-            "npm": {
-              "destination": "/usr/local/lib/node_modules/npm",
-              "links": {
-                "/usr/local/bin/npm": "/usr/local/lib/node_modules/npm/bin/npm-cli.js",
-                "/usr/local/bin/npx": "/usr/local/lib/node_modules/npm/bin/npx-cli.js"
-              },
-              "package": "https://registry.npmjs.org/npm/-/npm-11.21.1.tgz",
-              "sha256": "dd77c48eb845f4856c2cdba347cfb52bd877a2655a1ea48ff0c4796e3df9dd7b",
-              "type": "node-package",
-              "version": "11.21.1"
             }
           },
           "environment": {
@@ -1220,16 +1097,11 @@
               "sockets"
             ]
           },
+          "npm": {
+            "npm": "11.21.1"
+          },
           "pie": {
             "xdebug/xdebug": "3.5.3"
-          },
-          "sources": {
-            "xdebug/xdebug": {
-              "extension": "xdebug",
-              "ini": "zz-xdebug.ini",
-              "package": "https://github.com/xdebug/xdebug/archive/refs/tags/3.5.3.tar.gz",
-              "sha256": "954e56021668121ecc50b92d2ad1ce945f22ecf81ffc5bb5835219485b12ef5f"
-            }
           }
         },
         "download": {
@@ -1277,32 +1149,6 @@
           "imagick/imagick": "3.8.1",
           "php-memcached/php-memcached": "3.4.0",
           "phpredis/phpredis": "6.3.0"
-        },
-        "sources": {
-          "apcu/apcu": {
-            "extension": "apcu",
-            "ini": "docker-php-ext-apcu.ini",
-            "package": "https://github.com/krakjoe/apcu/archive/refs/tags/v5.1.28.tar.gz",
-            "sha256": "0e60ba9d0fa4021c57a70c071f3d8f71de236275d084e560d5959fec4edd8c32"
-          },
-          "imagick/imagick": {
-            "extension": "imagick",
-            "ini": "docker-php-ext-imagick.ini",
-            "package": "https://github.com/Imagick/imagick/archive/refs/tags/3.8.1.tar.gz",
-            "sha256": "b0e9279ddf6e75a8c6b4068e16daec0475427dbca7ce2e144e30a51a88aa5ddc"
-          },
-          "php-memcached/php-memcached": {
-            "extension": "memcached",
-            "ini": "docker-php-ext-memcached.ini",
-            "package": "https://github.com/php-memcached-dev/php-memcached/archive/refs/tags/v3.4.0.tar.gz",
-            "sha256": "10b98a0fdc3ce9ab823db59e8935f068de87e374728871a1efacdadd8c7807d1"
-          },
-          "phpredis/phpredis": {
-            "extension": "redis",
-            "ini": "docker-php-ext-redis.ini",
-            "package": "https://github.com/phpredis/phpredis/archive/refs/tags/6.3.0.tar.gz",
-            "sha256": "cb8f81df1a275599e4f8ddcfec7e1f65ed1953e6f5673649149fd680ebff4cad"
-          }
         },
         "variants": {
           "apache": {

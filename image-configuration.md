@@ -26,7 +26,7 @@ There is no implicit package selection based on release numbers.
 | `extensions.configure` | Module-to-argument-list map for `docker-php-ext-configure` |
 | `extensions.enable` | Already compiled modules enabled by `docker-php-ext-enable` |
 | `pie`, `pecl` | Extension package-to-version maps |
-| `sources` | Matching extension archive URLs, module names, INI names and optional configure arguments |
+| `npm` | Packages and versions installed globally through npm |
 | `download` | Tool versions, full artifact URLs, installation type and destination |
 | `config` | Absolute destination paths mapped to complete file lines |
 | `environment` | Runtime environment defaults |
@@ -34,19 +34,26 @@ There is no implicit package selection based on release numbers.
 | `volume`, `workdir`, `entrypoint` | Docker runtime metadata |
 
 Downloads support executable `binary` files and `tar.gz` archives extracted with
-one leading directory removed. `node-package` also checks the packaged npm engine
-constraint against the distribution Node.js. `links` maps symlink destinations to
-their targets. `temporary: true` removes a downloaded tool in the same build layer.
+one leading directory removed. `links` maps symlink destinations to their targets.
+Every direct download receives a checksum in `versions.json` and is verified
+during the build. `temporary: true` removes a downloaded tool in the same layer.
 The configured PIE download must be temporary. An optional `checksum` URL points
 to a publisher's SHA256 file; the first whitespace-separated field is verified.
 
-Extension sources are separately downloaded and verified before installation.
-PIE installs from the verified local source with interaction and automatic enabling
-disabled. Docker's PHP helper enables each resulting module using its configured
-INI name. The installed module version is checked against its package map. PIE,
-archives, workspaces and temporary build dependencies are removed in the same
-`RUN` instruction. Retained libraries are discovered from the compiled modules,
-using the existing Debian/Alpine cleanup mechanisms.
+PIE installs the exact configured `package:version` directly and uses Docker's PHP
+helper to enable it. APT, APK, PIE, PECL and npm manage their own package downloads;
+their packages need no extra source URLs or hashes in this configuration. If a
+PECL package is selected, list its module in `extensions.enable`.
+
+Node.js comes from the distribution. Development images install the distribution's
+npm temporarily, use it to install the configured npm version under `/usr/local`,
+then remove the bootstrap npm and its unneeded dependencies. `--engine-strict`
+rejects incompatible Node.js versions. Composer remains a direct PHAR download:
+distribution Composer packages depend on a separate distribution PHP installation.
+
+PIE, archives, installer workspaces, caches and temporary build dependencies are
+removed in the same `RUN` instruction. Retained libraries are discovered from the
+compiled modules using the existing Debian/Alpine cleanup mechanisms.
 
 Literal PHP environment references such as `${JOOMLA_XDEBUG_CLIENT_HOST}` are
 preserved in generated configuration. `${DEB_BUILD_MULTIARCH}` is the supported
