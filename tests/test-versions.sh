@@ -27,7 +27,7 @@ url= destination=
 while (($#)); do
     case "$1" in
         -o) destination="$2"; shift 2 ;;
-        -H|--retry|--connect-timeout|--max-time|--proto|--proto-redir) shift 2 ;;
+        -H|--retry|--retry-max-time|--connect-timeout|--max-time|--proto|--proto-redir) shift 2 ;;
         --*) shift ;;
         https://*) url="$1"; shift ;;
         *) echo "Unexpected curl argument: $1" >&2; exit 1 ;;
@@ -35,6 +35,7 @@ while (($#)); do
 done
 printf '%s\n' "$url" >> "$FIXTURE_CALLS"
 [[ "${FIXTURE_FAILURE:-}" != http ]] || exit 22
+if [[ "${FIXTURE_FAILURE:-}" == connection && "$url" == https://xdebug.org/* ]]; then exit 7; fi
 if [[ "${FIXTURE_FAILURE:-}" == tool && "$url" != https://*github.com/* ]]; then exit 22; fi
 if [[ "${FIXTURE_FAILURE:-}" == npm && "$url" == https://registry.npmjs.org/* ]]; then exit 22; fi
 if [[ "$url" == https://api.github.com/* ]]; then
@@ -111,7 +112,7 @@ reject() {
     if "$@" > "$work/log" 2>&1; then echo "FAIL: unexpectedly succeeded: $*" >&2; exit 1; fi
     cmp versions.json "$work/baseline.json"
 }
-for failure in http missing duplicate digest checksum tool npm composer-digest composer-checksum; do
+for failure in http connection missing duplicate digest checksum tool npm composer-digest composer-checksum; do
     reject env FIXTURE_FAILURE="$failure" ./versions.sh --force
 done
 test_case="compute checksums when release metadata has no digest"

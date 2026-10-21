@@ -52,7 +52,7 @@ selected() {
 if [ -f versions.json ]; then jq -e 'type == "object"' versions.json > /dev/null; fi
 cp "$work/helper.json" "$work/result.json"
 fetch() {
-    curl --fail --show-error --silent --location --retry 3 \
+    curl --fail --show-error --silent --location --retry 3 --retry-all-errors --retry-max-time 300 \
         --connect-timeout 15 --max-time 300 --proto '=https' --proto-redir '=https' "$@"
 }
 
