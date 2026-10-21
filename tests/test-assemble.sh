@@ -5,24 +5,24 @@ trap 'echo "FAIL: $test_case (${BASH_SOURCE[0]}:$LINENO)" >&2' ERR
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-assembler="$repo/scripts/assemble-config.sh"
+assembler="$repo/src/build/lib/assemble-config.sh"
 config="$work/config"
-mkdir -p "$config/versions-helper/php" "$config/versions-helper/joomla"
+mkdir -p "$config/php" "$config/joomla"
 
 cat >"$config/index.json" <<'JSON'
 {
-  "archives": "versions-helper/archives.json",
-  "phpVersions": "versions-helper/php",
-  "joomlaVersions": "versions-helper/joomla"
+  "archives": "archives.json",
+  "phpVersions": "php",
+  "joomlaVersions": "joomla"
 }
 JSON
-cat >"$config/versions-helper/archives.json" <<'JSON'
+cat >"$config/archives.json" <<'JSON'
 {
   "tar.zst": {"apt": ["zstd"], "apk": ["zstd"]},
   "tar.gz": {"apt": [], "apk": []}
 }
 JSON
-cat >"$config/versions-helper/php/8.3.json" <<'JSON'
+cat >"$config/php/8.3.json" <<'JSON'
 {
   "download": {
     "example": {
@@ -55,7 +55,7 @@ cat >"$config/versions-helper/php/8.3.json" <<'JSON'
   }
 }
 JSON
-cat >"$config/versions-helper/joomla/6.2.json" <<'JSON'
+cat >"$config/joomla/6.2.json" <<'JSON'
 {
   "phpVersions": {"8.3": {"development": false}},
   "variant": "apache",
@@ -70,7 +70,7 @@ cat >"$config/versions-helper/joomla/6.2.json" <<'JSON'
   }
 }
 JSON
-cat >"$config/versions-helper/joomla/6.3.json" <<'JSON'
+cat >"$config/joomla/6.3.json" <<'JSON'
 {
   "phpVersions": {
     "8.3": {
@@ -144,64 +144,64 @@ cmp "$work/assembled.json" "$work/from-root.json"
 cmp "$work/assembled.json" "$work/from-relative-index.json"
 
 test_case='one shared profile edit reaches every referencing Joomla series'
-jq '.download.example.version = "1.2.4"' "$config/versions-helper/php/8.3.json" >"$work/changed.json"
-mv "$work/changed.json" "$config/versions-helper/php/8.3.json"
+jq '.download.example.version = "1.2.4"' "$config/php/8.3.json" >"$work/changed.json"
+mv "$work/changed.json" "$config/php/8.3.json"
 assemble | jq -e 'all(.[]; .phpVersions["8.3"].download.example.version == "1.2.4")' >/dev/null
 restore
 
 test_case='new PHP and Joomla files are discovered without editing the index'
-jq '.variants.apache.base = "php:8.4-apache"' "$config/versions-helper/php/8.3.json" >"$config/versions-helper/php/8.4.json"
+jq '.variants.apache.base = "php:8.4-apache"' "$config/php/8.3.json" >"$config/php/8.4.json"
 jq '
     .phpVersions = {"8.4": {"development": false}}
     | .states.stable.version = "6.4.0"
     | .states.stable.php = "8.4"
     | .states.stable.aliases = []
-' "$config/versions-helper/joomla/6.2.json" >"$config/versions-helper/joomla/6.4.json"
+' "$config/joomla/6.2.json" >"$config/joomla/6.4.json"
 assemble | jq -e '
     keys == ["6.2", "6.3", "6.4"]
     and .["6.4"].phpVersions["8.4"].variants.apache.base == "php:8.4-apache"
     and (.["6.4"].phpVersions["8.4"] | has("dev") | not)
 ' >/dev/null
-rm "$config/versions-helper/php/8.4.json" "$config/versions-helper/joomla/6.4.json"
+rm "$config/php/8.4.json" "$config/joomla/6.4.json"
 
 test_case='development false removes dev settings even when overrides contain them'
 jq '.phpVersions["8.3"].overrides.dev = {"apt":["disabled-dev-package"]}' \
-    "$config/versions-helper/joomla/6.2.json" >"$work/changed.json"
-mv "$work/changed.json" "$config/versions-helper/joomla/6.2.json"
+    "$config/joomla/6.2.json" >"$work/changed.json"
+mv "$work/changed.json" "$config/joomla/6.2.json"
 assemble | jq -e '.["6.2"].phpVersions["8.3"] | has("dev") | not' >/dev/null
 restore
 
 jq '.phpVersions["9.9"] = {"development": false}' \
-    "$config/versions-helper/joomla/6.2.json" >"$work/changed.json"
-mv "$work/changed.json" "$config/versions-helper/joomla/6.2.json"
+    "$config/joomla/6.2.json" >"$work/changed.json"
+mv "$work/changed.json" "$config/joomla/6.2.json"
 reject 'referenced PHP profile does not exist'
 restore
 
-jq 'del(.dev)' "$config/versions-helper/php/8.3.json" >"$work/changed.json"
-mv "$work/changed.json" "$config/versions-helper/php/8.3.json"
+jq 'del(.dev)' "$config/php/8.3.json" >"$work/changed.json"
+mv "$work/changed.json" "$config/php/8.3.json"
 reject 'development requested without a dev profile'
 restore
 
 for selector in '"yes"' 'null' '[]'; do
     jq --argjson selector "$selector" '.phpVersions["8.3"].development = $selector' \
-        "$config/versions-helper/joomla/6.2.json" >"$work/changed.json"
-    mv "$work/changed.json" "$config/versions-helper/joomla/6.2.json"
+        "$config/joomla/6.2.json" >"$work/changed.json"
+    mv "$work/changed.json" "$config/joomla/6.2.json"
     reject "nonboolean development selector $selector"
     restore
 done
 
-jq '.phpVersions["8.3"].overrides = []' "$config/versions-helper/joomla/6.2.json" >"$work/changed.json"
-mv "$work/changed.json" "$config/versions-helper/joomla/6.2.json"
+jq '.phpVersions["8.3"].overrides = []' "$config/joomla/6.2.json" >"$work/changed.json"
+mv "$work/changed.json" "$config/joomla/6.2.json"
 reject 'nonobject profile overrides'
 restore
 
 for directory in php joomla; do
-    printf '{}\n' >"$config/versions-helper/$directory/notes.json"
+    printf '{}\n' >"$config/$directory/notes.json"
     reject "invalid version filename in $directory"
-    rm "$config/versions-helper/$directory/notes.json"
+    rm "$config/$directory/notes.json"
 done
 
-for file in index.json versions-helper/archives.json versions-helper/php/8.3.json versions-helper/joomla/6.2.json; do
+for file in index.json archives.json php/8.3.json joomla/6.2.json; do
     for content in '{invalid' '[]' $'{}\n{}'; do
         printf '%s\n' "$content" >"$config/$file"
         reject "malformed, nonobject or multiple JSON documents in $file"
@@ -209,15 +209,15 @@ for file in index.json versions-helper/archives.json versions-helper/php/8.3.jso
     done
 done
 
-for file in versions-helper/archives.json versions-helper/php/8.3.json versions-helper/joomla/6.2.json; do
+for file in archives.json php/8.3.json joomla/6.2.json; do
     jq '.sha256 = ("a" * 64)' "$config/$file" >"$work/changed.json"
     mv "$work/changed.json" "$config/$file"
     reject "input checksum in $file"
     restore
 done
-printf '{"sha512":"%0128d"}\n' 0 >"$config/versions-helper/php/9.9.json"
+printf '{"sha512":"%0128d"}\n' 0 >"$config/php/9.9.json"
 reject 'input checksum in an unused PHP profile'
-rm "$config/versions-helper/php/9.9.json"
+rm "$config/php/9.9.json"
 
 jq '.phpVersions = "missing-profiles"' "$config/index.json" >"$work/changed.json"
 mv "$work/changed.json" "$config/index.json"

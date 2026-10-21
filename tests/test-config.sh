@@ -8,18 +8,18 @@ trap 'rm -rf "$work"' EXIT
 
 test_case="maintained helper and resolved snapshot are valid"
 # Validate the maintained helper and the current resolved snapshot independently.
-bash "$repo/scripts/assemble-config.sh" "$repo/versions-helper.json" \
-    | jq --arg mode helper -f "$repo/scripts/validate-config.jq" >/dev/null
+bash "$repo/src/build/lib/assemble-config.sh" "$repo/conf/versions-helper.json" \
+    | jq --arg mode helper -f "$repo/src/build/lib/validate-config.jq" >/dev/null
 jq --arg fixture current \
-    -f "$repo/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repo/versions.json}" \
-    | jq --arg mode resolved -f "$repo/scripts/validate-config.jq" >/dev/null
+    -f "$repo/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repo/conf/versions.json}" \
+    | jq --arg mode resolved -f "$repo/src/build/lib/validate-config.jq" >/dev/null
 
 # Malformed input cases use one isolated fake series, never a maintained release.
 jq --arg fixture synthetic \
-    -f "$repo/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repo/versions.json}" \
+    -f "$repo/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repo/conf/versions.json}" \
     | jq '.["100.0"]' > "$work/settings.json"
 check() {
-    jq '{"100.0": .}' "$1" | jq --arg mode "${2:-resolved}" -f "$repo/scripts/validate-config.jq" >/dev/null
+    jq '{"100.0": .}' "$1" | jq --arg mode "${2:-resolved}" -f "$repo/src/build/lib/validate-config.jq" >/dev/null
 }
 # Humans provide settings and versions, including custom package URLs. Hashes
 # are generated into the resolved snapshot and must never be required here.
@@ -101,7 +101,7 @@ jq '.states.beta.php = (.phpVersions | keys[-1])
     | .states.rc.packageType = "tar.bz2"' "$work/settings.json" > "$work/state-settings.json"
 check "$work/state-settings.json"
 jq '{"100.0": .}' "$work/state-settings.json" \
-    | jq --arg mode resolved -f "$repo/scripts/validate-config.jq" \
+    | jq --arg mode resolved -f "$repo/src/build/lib/validate-config.jq" \
     | jq -e '.["100.0"] | .states.beta.php == (.phpVersions | keys[-1])
         and .states.beta.packageType == "tar.gz" and .states.rc.packageType == "tar.bz2"
         and .states.stable.packageType == "tar.zst"' >/dev/null

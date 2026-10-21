@@ -9,14 +9,14 @@ trap 'printf "FAIL: %s:%s: %s\n" "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >
 # Check the maintained matrix without reproducing the tag expansion algorithm.
 for fixture in current synthetic; do
   jq --arg fixture "$fixture" \
-    -f "$repository/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repository/versions.json}" >"$temporary/config.json"
+    -f "$repository/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repository/conf/versions.json}" >"$temporary/config.json"
   if [[ "$fixture" == synthetic ]]; then
     # Tag-only fixtures use deliberately fictional PHP versions; no image is built.
     jq 'map_values(.states |= map_values(.php = "100.0") | .phpVersions = {"100.0": {dev:{}}, "100.1": {}}
       | .variant = "apache" | .variants = ["apache", "fpm"])' "$temporary/config.json" >"$temporary/synthetic.json"
     mv "$temporary/synthetic.json" "$temporary/config.json"
   fi
-  jq -f "$repository/scripts/tags.jq" "$temporary/config.json" >"$temporary/plan.json"
+  jq -f "$repository/src/build/lib/tags.jq" "$temporary/config.json" >"$temporary/plan.json"
   jq -e --slurpfile config "$temporary/config.json" '
     . as $plan | $config[0] as $config
     | ([.[] | .tags[]] | length == (unique | length))
@@ -25,7 +25,7 @@ for fixture in current synthetic; do
       and all(.[]; . as $context | .version == $config[.series].states[.state].version
         and ($config[.series].phpVersions | has($context.php))
         and ($config[.series].variants | index($context.variant) != null)
-        and .directory == (.series + "/" + .state + "/php" + .php + "/" + .variant
+        and .directory == ("images/" + .series + "/" + .state + "/php" + .php + "/" + .variant
           + (if .development then "-dev" else "" end)))
       and all(.[] | select(.tags | index("latest"));
         .state == "stable" and .development == false
@@ -42,19 +42,19 @@ done
 # Cover stable aliases, every prerelease state, defaults, and nondefault contexts.
 cat >"$temporary/expected.json" <<'JSON'
 {
-  "100.0/stable/php100.0/apache": [
+  "images/100.0/stable/php100.0/apache": [
     "100.0.0", "100.0", "100", "latest",
     "100.0.0-apache", "100.0-apache", "100-apache", "apache",
     "100.0.0-php100.0", "100.0-php100.0", "100-php100.0", "php100.0",
     "100.0.0-php100.0-apache", "100.0-php100.0-apache", "100-php100.0-apache", "php100.0-apache"
   ],
-  "100.0/alpha/php100.0/apache": [
+  "images/100.0/alpha/php100.0/apache": [
     "100.0.1-alpha1", "100.0-alpha", "100.0.1-alpha1-apache", "100.0-alpha-apache",
     "100.0.1-alpha1-php100.0", "100.0-alpha-php100.0", "100.0.1-alpha1-php100.0-apache", "100.0-alpha-php100.0-apache"
   ],
-  "100.0/beta/php100.1/apache": ["100.0.1-beta1-php100.1-apache", "100.0-beta-php100.1-apache"],
-  "100.0/rc/php100.0/fpm": ["100.0.1-rc1-php100.0-fpm", "100.0-rc-php100.0-fpm"],
-  "101.0/alpha/php100.0/apache": [
+  "images/100.0/beta/php100.1/apache": ["100.0.1-beta1-php100.1-apache", "100.0-beta-php100.1-apache"],
+  "images/100.0/rc/php100.0/fpm": ["100.0.1-rc1-php100.0-fpm", "100.0-rc-php100.0-fpm"],
+  "images/101.0/alpha/php100.0/apache": [
     "101.0.0-alpha1", "101.0.0-alpha1-apache", "101.0.0-alpha1-php100.0", "101.0.0-alpha1-php100.0-apache"
   ]
 }
@@ -68,29 +68,29 @@ jq -e --slurpfile expected "$temporary/expected.json" '
 
 # The default is configurable, not implicitly Apache or the first PHP version.
 jq '."100.0".states.stable.php = "100.1" | ."100.0".variant = "fpm"' "$temporary/config.json" \
-  | jq -f "$repository/scripts/tags.jq" \
+  | jq -f "$repository/src/build/lib/tags.jq" \
   | jq -e 'map(select(.tags | index("latest")))
-      | length == 1 and .[0].directory == "100.0/stable/php100.1/fpm"' >/dev/null
+      | length == 1 and .[0].directory == "images/100.0/stable/php100.1/fpm"' >/dev/null
 
 # Different states select their default independently while keeping the full matrix.
 jq '."100.0".states.beta.php = "100.1"' "$temporary/config.json" \
-  | jq -f "$repository/scripts/tags.jq" \
+  | jq -f "$repository/src/build/lib/tags.jq" \
   | jq -e --slurpfile original "$temporary/plan.json" '
       length == ($original[0] | length)
-      and ([.[] | select(.tags | index("100.0-beta")) | .directory] == ["100.0/beta/php100.1/apache"])
-      and ([.[] | select(.tags | index("latest")) | .directory] == ["100.0/stable/php100.0/apache"])
+      and ([.[] | select(.tags | index("100.0-beta")) | .directory] == ["images/100.0/beta/php100.1/apache"])
+      and ([.[] | select(.tags | index("latest")) | .directory] == ["images/100.0/stable/php100.0/apache"])
       and ([.[] | select(.series == "100.0" and .state == "beta") | .php] | unique == ["100.0", "100.1"])
     ' >/dev/null
 
 # Synthetic series are isolated from maintained releases and never downloaded.
 for expression in '.["101.0"].states.alpha.aliases = []' 'del(.["101.0"].states.alpha.aliases)' '.["101.0"].states.alpha.aliases = null'; do
-  jq "$expression" "$temporary/config.json" | jq -f "$repository/scripts/tags.jq" >"$temporary/actual.json"
+  jq "$expression" "$temporary/config.json" | jq -f "$repository/src/build/lib/tags.jq" >"$temporary/actual.json"
   cmp "$temporary/plan.json" "$temporary/actual.json"
 done
 reject() {
   local expression="$1" diagnostic="$2"
   jq "$expression" "$temporary/config.json" >"$temporary/invalid.json"
-  if jq -f "$repository/scripts/tags.jq" "$temporary/invalid.json" >"$temporary/output" 2>"$temporary/error"; then
+  if jq -f "$repository/src/build/lib/tags.jq" "$temporary/invalid.json" >"$temporary/output" 2>"$temporary/error"; then
     printf 'FAIL: accepted %s\n' "$expression" >&2; exit 1
   fi
   [[ ! -s "$temporary/output" ]] || { printf 'FAIL: invalid config emitted a partial tag plan: %s\n' "$expression" >&2; exit 1; }

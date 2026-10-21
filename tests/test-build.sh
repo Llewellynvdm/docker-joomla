@@ -4,14 +4,18 @@ trap 'echo "FAIL: Dockerfile generation at line $LINENO" >&2' ERR
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-cp "$repo/build.sh" "$repo/"docker-entrypoint*.sh "$repo/makedb.php" "$repo/maintainers.json" "$work/"
-cp -r "$repo/scripts" "$work/"
-jq --arg fixture current -f "$repo/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repo/versions.json}" >"$work/versions.json"
-printf 'must not read helper\n' >"$work/versions-helper.json"
+mkdir -p "$work/src/build" "$work/src/runtime" "$work/conf"
+cp "$repo/src/build/build.sh" "$work/src/build/"
+cp -r "$repo/src/build/lib" "$work/src/build/"
+cp "$repo/src/runtime/"docker-entrypoint*.sh "$repo/src/runtime/makedb.php" "$work/src/runtime/"
+cp "$repo/conf/maintainers.json" "$work/conf/"
+jq --arg fixture current -f "$repo/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repo/conf/versions.json}" >"$work/conf/versions.json"
+printf 'must not read helper\n' >"$work/conf/versions-helper.json"
 cd "$work"
 mkdir retired
 printf 'preserve\n' >retired/Dockerfile
-./build.sh >/dev/null
+# Execute from outside the repository to exercise script-relative root discovery.
+(cd /; "$work/src/build/build.sh") >/dev/null
 
 contains() {
     if ! grep -Fq -- "$2" "$1"; then
@@ -63,9 +67,12 @@ run_commands() {
     ' "$1"
 }
 
-jq -c -f scripts/tags.jq versions.json | jq -c '.[]' >"$work/contexts"
+jq -c -f src/build/lib/tags.jq conf/versions.json | jq -c '.[]' >"$work/contexts"
 while IFS= read -r context; do
     directory="$(jq -r '.directory' <<<"$context")"
+    [[ "$directory" == images/* ]]
+    cmp src/runtime/docker-entrypoint.sh "$directory/docker-entrypoint.sh"
+    cmp src/runtime/makedb.php "$directory/makedb.php"
     dockerfile="$directory/Dockerfile"
     # These expected fields are maps with scalar/array leaves. Object merging
     # selects per-variant overrides after any per-PHP development additions.
@@ -73,7 +80,7 @@ while IFS= read -r context; do
         .[$context.series].phpVersions[$context.php] as $base
         | (if $context.development then $base.dev else {} end) as $dev
         | $base * $dev * $base.variants[$context.variant]
-    ' versions.json)"
+    ' conf/versions.json)"
     contains "$dockerfile" "FROM $(jq -r '.base' <<<"$image")"
     run_block "$dockerfile" 1 >"$work/install-run"
     run_block "$dockerfile" 2 >"$work/config-run"
@@ -110,7 +117,7 @@ while IFS= read -r context; do
         .[$context.series].phpVersions[$context.php] as $base
         | [$base, (if $context.development then $base.dev else {} end), $base.variants[$context.variant]]
         | [ .[] | (.extensions.install // [])[], (.extensions.check // [])[] ] | unique[]
-    ' versions.json)
+    ' conf/versions.json)
     manager=apt
     if [[ "$(jq -r '.variant' <<<"$context")" == *alpine* ]]; then manager=apk; fi
     while IFS= read -r entry; do
@@ -119,19 +126,19 @@ while IFS= read -r context; do
         .[$context.series].phpVersions[$context.php] as $base
         | [$base, (if $context.development then $base.dev else {} end), $base.variants[$context.variant]]
         | [ .[] | (.[$manager] // [])[], (.build[$manager] // [])[], (.extensions.install // [])[] ] | unique[]
-    ' versions.json)
+    ' conf/versions.json)
     while IFS= read -r check; do
         contains "$work/config-run" "$check"
     done < <(jq -r --argjson context "$context" '
         .[$context.series].phpVersions[$context.php] as $base
         | [$base, (if $context.development then $base.dev else {} end), $base.variants[$context.variant]]
         | [ .[] | (.checks // [])[] | join(" ") ] | unique[]
-    ' versions.json)
+    ' conf/versions.json)
     while IFS= read -r package; do
         contains "$work/joomla-run" "$package"
     done < <(jq -r --argjson context "$context" --arg manager "$manager" '
         .[$context.series] | .archives[.states[$context.state].packageType][$manager][]
-    ' versions.json)
+    ' conf/versions.json)
     contains "$dockerfile" 'COPY --chmod='
     [[ "$(grep -c '^COPY --chmod=' "$dockerfile")" == 2 ]]
     if [[ "$(jq -r '.variant' <<<"$context")" == *alpine* ]]; then
@@ -170,7 +177,7 @@ printf 'preserve\n' | cmp - retired/Dockerfile
 IFS=$'\t' read -r series state php variant < <(jq -r '
     to_entries[0] | [.key, (.value.states | keys[0]),
                     (.value.phpVersions | keys[0]), .value.variants[0]] | @tsv
-' versions.json)
+' conf/versions.json)
 literal="custom.value=can't \$(touch $work/executed)"
 configure_literal="--with-example=can't \"quoted\" \$(touch $work/executed-configure) \`touch $work/executed-backtick\`/\${DEB_BUILD_MULTIARCH}/tail"
 jq --arg series "$series" --arg php "$php" --arg variant "$variant" \
@@ -182,10 +189,10 @@ jq --arg series "$series" --arg php "$php" --arg variant "$variant" \
     | .[$series].phpVersions[$php].extensions.configure.example = [$configure]
     | .[$series].phpVersions[$php].download.pie.destination = $pie
     | .[$series].phpVersions[$php].variants[$variant].base = "php:100.0-test"
-' versions.json >"$work/trial.json"
+' conf/versions.json >"$work/trial.json"
 # Source the generator without invoking its publication entry point.
 # shellcheck source=/dev/null
-source ./build.sh
+source ./src/build/build.sh
 render() {
     render_dockerfile "$1" "$series" "$state" "$2" "$variant" "$3" >"$4"
 }
@@ -306,16 +313,16 @@ awk '
 excludes "$work/pecl" /tmp/extension-
 
 find . -name Dockerfile -print0 | sort -z | xargs -0 sha256sum >"$work/before"
-./build.sh >/dev/null
+./src/build/build.sh >/dev/null
 find . -name Dockerfile -print0 | sort -z | xargs -0 sha256sum >"$work/after"
 cmp "$work/before" "$work/after"
-if ./build.sh unknown/state >"$work/log" 2>&1; then echo 'Unknown selector accepted' >&2; exit 1; fi
+if ./src/build/build.sh unknown/state >"$work/log" 2>&1; then echo 'Unknown selector accepted' >&2; exit 1; fi
 # Reject invalid resolved input without changing any existing build contexts.
 jq --arg series "$series" --arg php "$php" '
     .[$series].phpVersions[$php].download.pie.sha256 = "invalid"
-' versions.json >"$work/invalid.json"
-mv "$work/invalid.json" versions.json
-if ./build.sh >"$work/log" 2>&1; then echo 'Invalid configuration accepted' >&2; exit 1; fi
+' conf/versions.json >"$work/invalid.json"
+mv "$work/invalid.json" conf/versions.json
+if ./src/build/build.sh >"$work/log" 2>&1; then echo 'Invalid configuration accepted' >&2; exit 1; fi
 find . -name Dockerfile -print0 | sort -z | xargs -0 sha256sum >"$work/after"
 cmp "$work/before" "$work/after"
 echo 'Dockerfile generator tests passed.'

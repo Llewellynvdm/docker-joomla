@@ -23,8 +23,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends jq shellcheck
       - name: Test configuration, resolution, tags and Dockerfile generation
         run: |
-          shellcheck update.sh versions.sh build.sh generate-stackbrew-library.sh scripts/*.sh tests/*.sh
+          shellcheck generate.sh release.sh src/build/*.sh src/build/lib/*.sh tests/*.sh
           ./tests/test-assemble.sh
+          ./tests/test-generate.sh
           ./tests/test-config.sh
           ./tests/test-versions.sh
           ./tests/test-tags.sh
@@ -35,12 +36,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          ./update.sh
-          jq -c -f scripts/tags.jq versions.json > "$RUNNER_TEMP/contexts.json"
+          ./generate.sh
+          jq -c -f src/build/lib/tags.jq conf/versions.json > "$RUNNER_TEMP/contexts.json"
           mapfile -t contexts < <(jq -r '.[].directory' "$RUNNER_TEMP/contexts.json")
-          status=$(git status --porcelain -- versions.json "${contexts[@]}")
+          status=$(git status --porcelain -- conf/versions.json "${contexts[@]}")
           if [[ -n "$status" ]]; then
             printf '%s\n' "$status"
-            echo '::error::Run ./update.sh and commit the active generated contexts and versions.json.'
+            echo '::error::Run ./generate.sh and commit the active generated contexts and conf/versions.json.'
             exit 1
           fi

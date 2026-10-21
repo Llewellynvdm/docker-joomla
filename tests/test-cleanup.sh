@@ -86,7 +86,7 @@ awk '
         if (/xargs -rt apt-mark manual/) { sub(/; \\$/, ";"); print; exit }
         print
     }
-' "$repo/scripts/cleanup-apt.inc" >"$work/apt-pipeline"
+' "$repo/src/build/lib/cleanup-apt.inc" >"$work/apt-pipeline"
 [[ -s "$work/apt-pipeline" ]]
 
 test_case='Debian suffix lookup excludes debug helpers and preserves multiarch names'
@@ -120,14 +120,14 @@ if TEST_LDD_STATUS=7 bash -euo pipefail "$work/apt-pipeline" >"$work/output" 2>"
 fi
 
 test_case='Alpine retains unique runtime sonames before removing build dependencies'
-bash -euo pipefail "$repo/scripts/cleanup-apk.inc"
+bash -euo pipefail "$repo/src/build/lib/cleanup-apk.inc"
 printf '%s\n' \
     'add --no-network --virtual .joomla-phpexts-rundeps so:libfirst.so.1 so:libsecond.so.2' \
     'del --no-network .build-deps' >"$work/expected-apk"
 cmp "$work/expected-apk" "$work/apk-calls"
 
 test_case='failed Alpine dependency discovery stops before package removal'
-if TEST_SCANELF_STATUS=7 bash -euo pipefail "$repo/scripts/cleanup-apk.inc" >"$work/output" 2>"$work/error"; then
+if TEST_SCANELF_STATUS=7 bash -euo pipefail "$repo/src/build/lib/cleanup-apk.inc" >"$work/output" 2>"$work/error"; then
     echo 'Failed scanelf discovery accepted' >&2
     exit 1
 fi

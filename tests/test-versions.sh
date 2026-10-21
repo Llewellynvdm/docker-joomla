@@ -6,12 +6,12 @@ trap 'echo "FAIL: $test_case (${BASH_SOURCE[0]}:$LINENO)" >&2' ERR
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-mkdir -p "$work/repo/scripts" "$work/bin"
-cp "$root/versions.sh" "$work/repo/"
-cp -r "$root/scripts/." "$work/repo/scripts/"
+mkdir -p "$work/repo/src/build/lib" "$work/repo/conf" "$work/bin"
+cp "$root/src/build/versions.sh" "$work/repo/src/build/"
+cp -r "$root/src/build/lib/." "$work/repo/src/build/lib/"
 fixture() {
     jq --arg fixture "$1" \
-        -f "$root/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$root/versions.json}"
+        -f "$root/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$root/conf/versions.json}"
 }
 helper_settings() {
     jq 'walk(if type == "object" then del(.sha256, .sha512) else . end)'
@@ -19,30 +19,30 @@ helper_settings() {
 split_helper() {
     local php series
     cat >"$work/helper-source.json"
-    mkdir -p versions-helper/php versions-helper/joomla
-    jq 'to_entries[0].value.archives' "$work/helper-source.json" >versions-helper/archives.json
+    mkdir -p conf/php conf/joomla
+    jq 'to_entries[0].value.archives' "$work/helper-source.json" >conf/archives.json
     while IFS= read -r php; do
         # A shared profile retains its optional dev additions; each series opts in.
         jq --arg php "$php" '[.[] | .phpVersions[$php] | select(. != null)] | sort_by(.dev != null) | last' \
-            "$work/helper-source.json" >"versions-helper/php/$php.json"
+            "$work/helper-source.json" >"conf/php/$php.json"
     done < <(jq -r '[.[] | .phpVersions | keys[]] | unique[]' "$work/helper-source.json")
     while IFS= read -r series; do
         jq --arg series "$series" '
             .[$series] | del(.archives)
             | .phpVersions |= with_entries(.value = {development: (.value.dev != null)})
-        ' "$work/helper-source.json" >"versions-helper/joomla/$series.json"
+        ' "$work/helper-source.json" >"conf/joomla/$series.json"
     done < <(jq -r 'keys[]' "$work/helper-source.json")
-    cat >versions-helper.json <<'JSON'
+    cat >conf/versions-helper.json <<'JSON'
 {
-  "archives": "versions-helper/archives.json",
-  "phpVersions": "versions-helper/php",
-  "joomlaVersions": "versions-helper/joomla"
+  "archives": "archives.json",
+  "phpVersions": "php",
+  "joomlaVersions": "joomla"
 }
 JSON
 }
 edit_profiles() {
     local profile
-    for profile in "$(jq -r '.phpVersions' versions-helper.json)"/*.json; do
+    for profile in "conf/$(jq -r '.phpVersions' conf/versions-helper.json)"/*.json; do
         jq "$1" "$profile" >"$work/helper"
         mv "$work/helper" "$profile"
     done
@@ -100,21 +100,21 @@ unset VERSIONS_HELPER
 cd "$work/repo"
 
 test_case="reuse resolved hashes without downloads"
-fixture current | jq --arg mode resolved -S -f scripts/validate-config.jq > versions.json
-helper_settings < versions.json | split_helper
-cp versions.json "$work/baseline.json"
-./versions.sh
-cmp versions.json "$work/baseline.json"
+fixture current | jq --arg mode resolved -S -f src/build/lib/validate-config.jq > conf/versions.json
+helper_settings < conf/versions.json | split_helper
+cp conf/versions.json "$work/baseline.json"
+(cd /; "$work/repo/src/build/versions.sh")
+cmp conf/versions.json "$work/baseline.json"
 [[ ! -s "$FIXTURE_CALLS" ]]
 
 test_case="resolve every configured artifact and reuse URL-keyed checksums"
-./versions.sh --force
+./src/build/versions.sh --force
 jq -e --arg sha "$FIXTURE_SHA256" --arg sha512 "$FIXTURE_SHA512" '
   all(.[]; all(.states[]; .sha512 == $sha512))
   and all(.. | objects | select(has("destination")); .sha256 == $sha)
-' versions.json >/dev/null
+' conf/versions.json >/dev/null
 before="$(wc -l < "$FIXTURE_CALLS")"
-./versions.sh
+./src/build/versions.sh
 [[ "$(wc -l < "$FIXTURE_CALLS")" == "$before" ]]
 
 test_case="forcing a later series refreshes a shared artifact exactly once"
@@ -124,17 +124,17 @@ shared="$(jq -ce '
     | group_by(.package)
     | map({package: .[0].package, series: (map(.series) | unique | sort)})
     | map(select(.package != null and (.series | length) > 1)) | first
-' versions.json)"
+' conf/versions.json)"
 shared_package="$(jq -r '.package' <<<"$shared")"
 selected_series="$(jq -r '.series[-1]' <<<"$shared")"
-cp versions.json "$work/before-targeted.json"
-./versions.sh --force "$selected_series"
+cp conf/versions.json "$work/before-targeted.json"
+./src/build/versions.sh --force "$selected_series"
 tail -n "+$((before + 1))" "$FIXTURE_CALLS" >"$work/targeted-requests"
 [[ "$(grep -Fxc -- "$shared_package" "$work/targeted-requests")" == 1 ]]
 jq --arg series "$selected_series" 'del(.[$series]) | map_values(.states)' \
     "$work/before-targeted.json" >"$work/unselected-before.json"
 jq --arg series "$selected_series" 'del(.[$series]) | map_values(.states)' \
-    versions.json >"$work/unselected-after.json"
+    conf/versions.json >"$work/unselected-after.json"
 cmp "$work/unselected-before.json" "$work/unselected-after.json"
 while IFS= read -r url; do
     if grep -Fxq -- "$url" "$work/targeted-requests"; then
@@ -145,29 +145,29 @@ done < <(jq -r --arg series "$selected_series" '
     | .package, ("https://api.github.com/repos/joomla/joomla-cms/releases/tags/" + .version)
 ' "$work/before-targeted.json")
 
-test_case="shared artifact failure during targeted force preserves versions.json"
-cp versions.json "$work/baseline.json"
-if env FIXTURE_FAILURE=pie ./versions.sh --force "$selected_series" >"$work/error" 2>&1; then
+test_case="shared artifact failure during targeted force preserves conf/versions.json"
+cp conf/versions.json "$work/baseline.json"
+if env FIXTURE_FAILURE=pie ./src/build/versions.sh --force "$selected_series" >"$work/error" 2>&1; then
     echo 'FAIL: targeted force accepted a failed shared PIE download' >&2; exit 1
 fi
-cmp versions.json "$work/baseline.json"
+cmp conf/versions.json "$work/baseline.json"
 before="$(wc -l < "$FIXTURE_CALLS")"
 
 test_case="settings changes require no downloads"
-cp -r versions-helper/php versions-helper/alternate-php
-for profile in versions-helper/alternate-php/*.json; do
+cp -r conf/php conf/alternate-php
+for profile in conf/alternate-php/*.json; do
     jq '.environment.TEST_SETTING = "configured"' "$profile" >"$work/helper"
     mv "$work/helper" "$profile"
 done
-jq '.phpVersions = "versions-helper/alternate-php"' versions-helper.json > .versions-helper.json
-./versions.sh
+jq '.phpVersions = "alternate-php"' conf/versions-helper.json > conf/.versions-helper.json
+./src/build/versions.sh
 [[ "$(wc -l < "$FIXTURE_CALLS")" == "$before" ]]
-jq -e 'all(.[]; all(.phpVersions[]; .environment.TEST_SETTING == "configured"))' versions.json >/dev/null
-mv .versions-helper.json versions-helper.json
+jq -e 'all(.[]; all(.phpVersions[]; .environment.TEST_SETTING == "configured"))' conf/versions.json >/dev/null
+mv conf/.versions-helper.json conf/versions-helper.json
 
 test_case="explicit helper override accepts a split-source index"
-cp versions-helper.json custom-index.json
-VERSIONS_HELPER=custom-index.json ./versions.sh
+cp conf/versions-helper.json conf/custom-index.json
+VERSIONS_HELPER=conf/custom-index.json ./src/build/versions.sh
 [[ "$(wc -l < "$FIXTURE_CALLS")" == "$before" ]]
 
 test_case="installer version changes do not resolve source downloads"
@@ -175,28 +175,28 @@ edit_profiles 'walk(if type == "object" then
     (if has("pie") and (.pie | type == "object") and (.pie | has("type") | not) then .pie |= map_values("100.0.0") else . end)
     | (if has("npm") and (.npm | type == "object") then .npm |= map_values("100.0.0") else . end)
   else . end)'
-./versions.sh
+./src/build/versions.sh
 [[ "$(wc -l < "$FIXTURE_CALLS")" == "$before" ]]
 
 test_case="new arbitrary download needs no resolver code"
-series="$(jq -r 'keys[0]' versions.json)"
-series_source="$(jq -r '.joomlaVersions' versions-helper.json)/$series.json"
+series="$(jq -r 'keys[0]' conf/versions.json)"
+series_source="conf/$(jq -r '.joomlaVersions' conf/versions-helper.json)/$series.json"
 state="$(jq -r '.states | keys[0]' "$series_source")"
 php="$(jq -r --arg state "$state" '.states[$state].php' "$series_source")"
-profile_source="$(jq -r '.phpVersions' versions-helper.json)/$php.json"
+profile_source="conf/$(jq -r '.phpVersions' conf/versions-helper.json)/$php.json"
 jq '
  .download.example = {
    version:"100.0.0", package:"https://example.test/tool.phar", type:"binary", destination:"/usr/local/bin/example"}
 ' "$profile_source" > "$work/helper"
 mv "$work/helper" "$profile_source"
-./versions.sh
+./src/build/versions.sh
 [[ "$(wc -l < "$FIXTURE_CALLS")" == "$((before + 1))" ]]
 
 # A source change, even with the same version, must never reuse an old digest.
 test_case="changed URL refreshes its checksum"
 jq '.download.example.package = "https://example.test/replacement.phar"' "$profile_source" > "$work/helper"
 mv "$work/helper" "$profile_source"
-./versions.sh
+./src/build/versions.sh
 [[ "$(wc -l < "$FIXTURE_CALLS")" == "$((before + 2))" ]]
 
 test_case="tool version alone updates its package and publisher-checksum URLs"
@@ -206,11 +206,11 @@ jq '.download.example |= . + {
     checksum: "https://getcomposer.org/download/{version}/composer.phar.sha256sum"
 }' "$profile_source" >"$work/helper"
 mv "$work/helper" "$profile_source"
-./versions.sh
+./src/build/versions.sh
 before="$(wc -l < "$FIXTURE_CALLS")"
 jq '.download.example.version = "100.0.1"' "$profile_source" >"$work/helper"
 mv "$work/helper" "$profile_source"
-./versions.sh
+./src/build/versions.sh
 [[ "$(wc -l < "$FIXTURE_CALLS")" == "$((before + 2))" ]]
 tail -n 2 "$FIXTURE_CALLS" >"$work/tool-requests"
 printf '%s\n' \
@@ -222,7 +222,7 @@ jq -e --arg php "$php" --arg sha "$FIXTURE_SHA256" '
         .version == "100.0.1" and .sha256 == $sha
         and .package == "https://getcomposer.org/download/100.0.1/composer.phar"
         and .checksum == "https://getcomposer.org/download/100.0.1/composer.phar.sha256sum")
-' versions.json >/dev/null
+' conf/versions.json >/dev/null
 
 test_case="Joomla version alone updates its package URL"
 case "$state" in
@@ -235,12 +235,12 @@ package="https://github.com/joomla/joomla-cms/releases/download/{version}/Joomla
 jq --arg state "$state" --arg package "$package" '.states[$state].package = $package' "$series_source" >"$work/helper"
 mv "$work/helper" "$series_source"
 before="$(wc -l < "$FIXTURE_CALLS")"
-./versions.sh
+./src/build/versions.sh
 [[ "$(wc -l < "$FIXTURE_CALLS")" == "$before" ]]
 new_version="$series.999$suffix"
 jq --arg state "$state" --arg version "$new_version" '.states[$state].version = $version' "$series_source" >"$work/helper"
 mv "$work/helper" "$series_source"
-./versions.sh
+./src/build/versions.sh
 [[ "$(wc -l < "$FIXTURE_CALLS")" == "$((before + 2))" ]]
 package_type="$(jq -r --arg state "$state" '.states[$state].packageType // .packageType' "$series_source")"
 tail -n 2 "$FIXTURE_CALLS" >"$work/joomla-requests"
@@ -253,33 +253,33 @@ jq -e --arg series "$series" --arg state "$state" --arg version "$new_version" -
     | .version == $version and .sha512 == $sha
       and (.package | contains($version))
       and (.package | contains("{version}") or contains("{packageType}") | not)
-' versions.json >/dev/null
+' conf/versions.json >/dev/null
 
 test_case="unknown URL placeholders fail before downloads or metadata changes"
 cp "$profile_source" "$work/profile-before.json"
-cp versions.json "$work/baseline.json"
+cp conf/versions.json "$work/baseline.json"
 before="$(wc -l < "$FIXTURE_CALLS")"
 jq '.download.example.package = "https://example.test/{unsupported}/tool.phar"' "$profile_source" >"$work/helper"
 mv "$work/helper" "$profile_source"
-if ./versions.sh >"$work/error" 2>&1; then echo 'FAIL: unknown URL placeholder accepted' >&2; exit 1; fi
+if ./src/build/versions.sh >"$work/error" 2>&1; then echo 'FAIL: unknown URL placeholder accepted' >&2; exit 1; fi
 [[ "$(wc -l < "$FIXTURE_CALLS")" == "$before" ]]
-cmp versions.json "$work/baseline.json"
+cmp conf/versions.json "$work/baseline.json"
 mv "$work/profile-before.json" "$profile_source"
 
 for failure in http connection missing duplicate digest checksum tool pie composer-digest composer-checksum; do
-    test_case="failed $failure resolution leaves existing versions.json untouched"
-    cp versions.json "$work/baseline.json"
-    if env FIXTURE_FAILURE="$failure" ./versions.sh --force >"$work/error" 2>&1; then
+    test_case="failed $failure resolution leaves existing conf/versions.json untouched"
+    cp conf/versions.json "$work/baseline.json"
+    if env FIXTURE_FAILURE="$failure" ./src/build/versions.sh --force >"$work/error" 2>&1; then
         echo "FAIL: accepted $failure" >&2; exit 1
     fi
-    cmp versions.json "$work/baseline.json"
+    cmp conf/versions.json "$work/baseline.json"
 done
 
 test_case="missing published Joomla digest still computes SHA512"
-env FIXTURE_FAILURE=no-digest ./versions.sh --force >/dev/null
-jq -e --arg sha "$FIXTURE_SHA512" 'all(.[]; all(.states[]; .sha512 == $sha))' versions.json >/dev/null
+env FIXTURE_FAILURE=no-digest ./src/build/versions.sh --force >/dev/null
+jq -e --arg sha "$FIXTURE_SHA512" 'all(.[]; all(.states[]; .sha512 == $sha))' conf/versions.json >/dev/null
 jq -se '[.[] | .. | objects | keys[] | select(. == "sha256" or . == "sha512")] | length == 0' \
-    versions-helper.json versions-helper/archives.json versions-helper/php/*.json \
-    versions-helper/alternate-php/*.json versions-helper/joomla/*.json >/dev/null
-if ./versions.sh unknown/state >"$work/error" 2>&1; then echo 'FAIL: unknown selector accepted' >&2; exit 1; fi
+    conf/versions-helper.json conf/archives.json conf/php/*.json \
+    conf/alternate-php/*.json conf/joomla/*.json >/dev/null
+if ./src/build/versions.sh unknown/state >"$work/error" 2>&1; then echo 'FAIL: unknown selector accepted' >&2; exit 1; fi
 echo 'Version resolution tests passed.'

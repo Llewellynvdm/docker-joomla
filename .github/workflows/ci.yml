@@ -29,20 +29,20 @@ jobs:
       - name: Resolve versions and generate contexts
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: ./update.sh
+        run: ./generate.sh
       - name: Verify deterministic generation and prepare matrix
         id: generate
         run: |
-          jq -c -f scripts/tags.jq versions.json > "$RUNNER_TEMP/contexts.json"
+          jq -c -f src/build/lib/tags.jq conf/versions.json > "$RUNNER_TEMP/contexts.json"
           mapfile -t contexts < <(jq -r '.[].directory' "$RUNNER_TEMP/contexts.json")
           find "${contexts[@]}" -type f -print0 | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/before.sha256"
-          ./build.sh
+          ./src/build/build.sh
           find "${contexts[@]}" -type f -print0 | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/after.sha256"
           cmp "$RUNNER_TEMP/before.sha256" "$RUNNER_TEMP/after.sha256"
           matrix=$(jq -c '{include: map({directory, variant, development, latest: (.tags | index("latest") != null), image: ("joomla:" + .tags[0])})}' "$RUNNER_TEMP/contexts.json")
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           jq -j '.[] | .directory + "\u0000"' "$RUNNER_TEMP/contexts.json" > "$RUNNER_TEMP/context-paths"
-          tar -czf "$RUNNER_TEMP/generated-contexts.tar.gz" --null -T "$RUNNER_TEMP/context-paths" versions.json
+          tar -czf "$RUNNER_TEMP/generated-contexts.tar.gz" --null -T "$RUNNER_TEMP/context-paths" conf/versions.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: generated-contexts

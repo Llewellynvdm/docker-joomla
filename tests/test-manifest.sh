@@ -5,11 +5,12 @@ trap 'echo "FAIL: $test_case (${BASH_SOURCE[0]}:$LINENO)" >&2' ERR
 repository="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 temporary="$(mktemp -d)"
 trap 'rm -rf "$temporary"' EXIT
-mkdir -p "$temporary/repository/scripts" "$temporary/bin"
-cp "$repository/generate-stackbrew-library.sh" "$repository/maintainers.json" "$temporary/repository/"
-cp "$repository/scripts/"*.jq "$temporary/repository/scripts/"
+mkdir -p "$temporary/repository/src/build/lib" "$temporary/repository/conf" "$temporary/bin"
+cp "$repository/release.sh" "$temporary/repository/"
+cp "$repository/conf/maintainers.json" "$temporary/repository/conf/"
+cp "$repository/src/build/lib/"*.jq "$temporary/repository/src/build/lib/"
 jq --arg fixture current \
-  -f "$repository/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repository/versions.json}" >"$temporary/repository/versions.json"
+  -f "$repository/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repository/conf/versions.json}" >"$temporary/repository/conf/versions.json"
 
 # Stub only the metadata download; architecture parsing uses real shell code.
 cat >"$temporary/bin/curl" <<'MOCK'
@@ -38,16 +39,16 @@ jq '
   | (.[$series].states | to_entries[0].value.php) as $php
   | .[$series].variants[0] as $variant
   | .[$series].phpVersions[$php].variants[$variant].base += "-fixture"
-' versions.json >"$temporary/configured.json"
-mv "$temporary/configured.json" versions.json
-jq -f scripts/tags.jq versions.json >"$temporary/plan.json"
+' conf/versions.json >"$temporary/configured.json"
+mv "$temporary/configured.json" conf/versions.json
+jq -f src/build/lib/tags.jq conf/versions.json >"$temporary/plan.json"
 while IFS=$'\t' read -r directory version parent; do
   mkdir -p "$directory"
   printf 'FROM %s\nENV JOOMLA_VERSION=%s\nCOPY runtime.ini /usr/local/etc/php/conf.d/runtime.ini\n' \
     "$parent" "$version" >"$directory/Dockerfile"
   printf '; fixture\n' >"$directory/runtime.ini"
   printf '%s\n' "$parent" >>"$temporary/parents"
-done < <(jq -r --slurpfile config versions.json '
+done < <(jq -r --slurpfile config conf/versions.json '
   .[] as $context
   | $config[0][$context.series].phpVersions[$context.php]
   | if $context.development then . * .dev else . end
@@ -68,7 +69,7 @@ git add .
 git commit -qm 'Create manifest fixture'
 
 test_case="manifest tags and directories match the publication plan"
-./generate-stackbrew-library.sh >"$temporary/manifest"
+(cd /; "$temporary/repository/release.sh") >"$temporary/manifest"
 jq -r '.[] | "Tags: " + (.tags | join(", "))' "$temporary/plan.json" >"$temporary/expected-tags"
 grep '^Tags:' "$temporary/manifest" >"$temporary/actual-tags"
 cmp "$temporary/expected-tags" "$temporary/actual-tags"
@@ -86,7 +87,7 @@ directory="$(jq -r '.[0].directory' "$temporary/plan.json")"
 parent="$(awk '$1 == "FROM" { print $2 }' "$directory/Dockerfile")"
 version="$(jq -r '.[0].version' "$temporary/plan.json")"
 STACKBREW_GIT_REPO=https://example.test/joomla.git STACKBREW_GIT_FETCH=refs/heads/test \
-  ./generate-stackbrew-library.sh "$selector/" >"$temporary/selected"
+  ./release.sh "$selector/" >"$temporary/selected"
 [[ "$(grep -c '^Directory:' "$temporary/selected")" == "$(jq --arg selector "$selector" '[.[] | select((.series + "/" + .state) == $selector)] | length' "$temporary/plan.json")" ]]
 grep -q '^GitRepo: https://example.test/joomla.git$' "$temporary/selected"
 grep -q '^GitFetch: refs/heads/test$' "$temporary/selected"
@@ -94,7 +95,7 @@ grep -q '^GitFetch: refs/heads/test$' "$temporary/selected"
 reject() {
   local diagnostic="$1"; shift
   test_case="reject invalid manifest input: $diagnostic"
-  if ./generate-stackbrew-library.sh "$@" >"$temporary/output" 2>"$temporary/error"; then
+  if ./release.sh "$@" >"$temporary/output" 2>"$temporary/error"; then
     printf 'FAIL: expected manifest error: %s\n' "$diagnostic" >&2; exit 1
   fi
   if [[ -s "$temporary/output" ]]; then
@@ -114,7 +115,7 @@ reject 'uncommitted changes'
 git add "$directory/runtime.ini"
 git commit -qm 'Change a copied runtime file'
 test_case="a changed copied file updates the context GitCommit"
-./generate-stackbrew-library.sh "$selector" >"$temporary/copied-file"
+./release.sh "$selector" >"$temporary/copied-file"
 jq -ne --arg text "$(cat "$temporary/copied-file")" --arg commit "$(git rev-parse HEAD)" --arg directory "$directory" \
   '$text | contains("GitCommit: " + $commit + "\nDirectory: " + $directory)' >/dev/null
 for architectures in '' '   ' unrecognised; do
