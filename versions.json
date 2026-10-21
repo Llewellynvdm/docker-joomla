@@ -1,5 +1,31 @@
 {
   "5.4": {
+    "archives": {
+      "tar.bz2": {
+        "apk": [
+          "bzip2"
+        ],
+        "apt": [
+          "bzip2"
+        ]
+      },
+      "tar.gz": {
+        "apk": [
+          "gzip"
+        ],
+        "apt": [
+          "gzip"
+        ]
+      },
+      "tar.zst": {
+        "apk": [
+          "zstd"
+        ],
+        "apt": [
+          "zstd"
+        ]
+      }
+    },
     "packageType": "tar.zst",
     "php": "8.3",
     "phpVersions": {
@@ -32,8 +58,7 @@
             "libtool",
             "linux-headers",
             "zlib-dev",
-            "unzip",
-            "zstd"
+            "unzip"
           ],
           "apt": [
             "libbz2-dev",
@@ -51,8 +76,7 @@
             "automake",
             "libtool",
             "zlib1g-dev",
-            "unzip",
-            "zstd"
+            "unzip"
           ]
         },
         "config": {
@@ -62,7 +86,6 @@
             "display_startup_errors = Off",
             "log_errors = On",
             "error_log = /dev/stderr",
-            "log_errors_max_len = 1024",
             "ignore_repeated_errors = On",
             "ignore_repeated_source = Off",
             "html_errors = Off"
@@ -91,6 +114,13 @@
           "JOOMLA_INSTALLATION_DISABLE_LOCALHOST_CHECK": "1"
         },
         "extensions": {
+          "check": [
+            "apcu",
+            "imagick",
+            "memcached",
+            "redis",
+            "Zend OPcache"
+          ],
           "configure": {
             "gd": [
               "--with-freetype",
@@ -136,6 +166,12 @@
               "remoteAddress": true
             },
             "base": "php:8.2-apache",
+            "checks": [
+              [
+                "apache2ctl",
+                "-t"
+              ]
+            ],
             "command": [
               "apache2-foreground"
             ],
@@ -159,6 +195,12 @@
           },
           "fpm": {
             "base": "php:8.2-fpm",
+            "checks": [
+              [
+                "php-fpm",
+                "-t"
+              ]
+            ],
             "command": [
               "php-fpm"
             ],
@@ -172,6 +214,12 @@
           },
           "fpm-alpine": {
             "base": "php:8.2-fpm-alpine",
+            "checks": [
+              [
+                "php-fpm",
+                "-t"
+              ]
+            ],
             "command": [
               "php-fpm"
             ],
@@ -216,8 +264,7 @@
             "libtool",
             "linux-headers",
             "zlib-dev",
-            "unzip",
-            "zstd"
+            "unzip"
           ],
           "apt": [
             "libbz2-dev",
@@ -235,8 +282,7 @@
             "automake",
             "libtool",
             "zlib1g-dev",
-            "unzip",
-            "zstd"
+            "unzip"
           ]
         },
         "config": {
@@ -246,7 +292,6 @@
             "display_startup_errors = Off",
             "log_errors = On",
             "error_log = /dev/stderr",
-            "log_errors_max_len = 1024",
             "ignore_repeated_errors = On",
             "ignore_repeated_source = Off",
             "html_errors = Off"
@@ -275,6 +320,13 @@
           "JOOMLA_INSTALLATION_DISABLE_LOCALHOST_CHECK": "1"
         },
         "extensions": {
+          "check": [
+            "apcu",
+            "imagick",
+            "memcached",
+            "redis",
+            "Zend OPcache"
+          ],
           "configure": {
             "gd": [
               "--with-freetype",
@@ -320,6 +372,12 @@
               "remoteAddress": true
             },
             "base": "php:8.3-apache",
+            "checks": [
+              [
+                "apache2ctl",
+                "-t"
+              ]
+            ],
             "command": [
               "apache2-foreground"
             ],
@@ -343,6 +401,12 @@
           },
           "fpm": {
             "base": "php:8.3-fpm",
+            "checks": [
+              [
+                "php-fpm",
+                "-t"
+              ]
+            ],
             "command": [
               "php-fpm"
             ],
@@ -356,6 +420,12 @@
           },
           "fpm-alpine": {
             "base": "php:8.3-fpm-alpine",
+            "checks": [
+              [
+                "php-fpm",
+                "-t"
+              ]
+            ],
             "command": [
               "php-fpm"
             ],
@@ -392,6 +462,32 @@
     ]
   },
   "6.2": {
+    "archives": {
+      "tar.bz2": {
+        "apk": [
+          "bzip2"
+        ],
+        "apt": [
+          "bzip2"
+        ]
+      },
+      "tar.gz": {
+        "apk": [
+          "gzip"
+        ],
+        "apt": [
+          "gzip"
+        ]
+      },
+      "tar.zst": {
+        "apk": [
+          "zstd"
+        ],
+        "apt": [
+          "zstd"
+        ]
+      }
+    },
     "packageType": "tar.zst",
     "php": "8.4",
     "phpVersions": {
@@ -424,8 +520,7 @@
             "libtool",
             "linux-headers",
             "zlib-dev",
-            "unzip",
-            "zstd"
+            "unzip"
           ],
           "apt": [
             "libbz2-dev",
@@ -443,8 +538,7 @@
             "automake",
             "libtool",
             "zlib1g-dev",
-            "unzip",
-            "zstd"
+            "unzip"
           ]
         },
         "config": {
@@ -454,7 +548,6 @@
             "display_startup_errors = Off",
             "log_errors = On",
             "error_log = /dev/stderr",
-            "log_errors_max_len = 1024",
             "ignore_repeated_errors = On",
             "ignore_repeated_source = Off",
             "html_errors = Off"
@@ -506,6 +599,20 @@
               "npm"
             ]
           },
+          "checks": [
+            [
+              "composer",
+              "--version"
+            ],
+            [
+              "npm",
+              "--version"
+            ],
+            [
+              "npx",
+              "--version"
+            ]
+          ],
           "config": {
             "/usr/local/etc/php/conf.d/zz-joomla-development.ini": [
               "error_reporting = E_ALL",
@@ -544,6 +651,9 @@
             "XDEBUG_MODE": "develop,debug"
           },
           "extensions": {
+            "check": [
+              "xdebug"
+            ],
             "install": [
               "pcntl",
               "sockets"
@@ -573,6 +683,13 @@
           "JOOMLA_INSTALLATION_DISABLE_LOCALHOST_CHECK": "1"
         },
         "extensions": {
+          "check": [
+            "apcu",
+            "imagick",
+            "memcached",
+            "redis",
+            "Zend OPcache"
+          ],
           "configure": {
             "gd": [
               "--with-freetype",
@@ -618,6 +735,12 @@
               "remoteAddress": true
             },
             "base": "php:8.3-apache",
+            "checks": [
+              [
+                "apache2ctl",
+                "-t"
+              ]
+            ],
             "command": [
               "apache2-foreground"
             ],
@@ -641,6 +764,12 @@
           },
           "fpm": {
             "base": "php:8.3-fpm",
+            "checks": [
+              [
+                "php-fpm",
+                "-t"
+              ]
+            ],
             "command": [
               "php-fpm"
             ],
@@ -654,6 +783,12 @@
           },
           "fpm-alpine": {
             "base": "php:8.3-fpm-alpine",
+            "checks": [
+              [
+                "php-fpm",
+                "-t"
+              ]
+            ],
             "command": [
               "php-fpm"
             ],
@@ -698,8 +833,7 @@
             "libtool",
             "linux-headers",
             "zlib-dev",
-            "unzip",
-            "zstd"
+            "unzip"
           ],
           "apt": [
             "libbz2-dev",
@@ -717,8 +851,7 @@
             "automake",
             "libtool",
             "zlib1g-dev",
-            "unzip",
-            "zstd"
+            "unzip"
           ]
         },
         "config": {
@@ -728,7 +861,6 @@
             "display_startup_errors = Off",
             "log_errors = On",
             "error_log = /dev/stderr",
-            "log_errors_max_len = 1024",
             "ignore_repeated_errors = On",
             "ignore_repeated_source = Off",
             "html_errors = Off"
@@ -780,6 +912,20 @@
               "npm"
             ]
           },
+          "checks": [
+            [
+              "composer",
+              "--version"
+            ],
+            [
+              "npm",
+              "--version"
+            ],
+            [
+              "npx",
+              "--version"
+            ]
+          ],
           "config": {
             "/usr/local/etc/php/conf.d/zz-joomla-development.ini": [
               "error_reporting = E_ALL",
@@ -818,6 +964,9 @@
             "XDEBUG_MODE": "develop,debug"
           },
           "extensions": {
+            "check": [
+              "xdebug"
+            ],
             "install": [
               "pcntl",
               "sockets"
@@ -847,6 +996,13 @@
           "JOOMLA_INSTALLATION_DISABLE_LOCALHOST_CHECK": "1"
         },
         "extensions": {
+          "check": [
+            "apcu",
+            "imagick",
+            "memcached",
+            "redis",
+            "Zend OPcache"
+          ],
           "configure": {
             "gd": [
               "--with-freetype",
@@ -892,6 +1048,12 @@
               "remoteAddress": true
             },
             "base": "php:8.4-apache",
+            "checks": [
+              [
+                "apache2ctl",
+                "-t"
+              ]
+            ],
             "command": [
               "apache2-foreground"
             ],
@@ -915,6 +1077,12 @@
           },
           "fpm": {
             "base": "php:8.4-fpm",
+            "checks": [
+              [
+                "php-fpm",
+                "-t"
+              ]
+            ],
             "command": [
               "php-fpm"
             ],
@@ -928,6 +1096,12 @@
           },
           "fpm-alpine": {
             "base": "php:8.4-fpm-alpine",
+            "checks": [
+              [
+                "php-fpm",
+                "-t"
+              ]
+            ],
             "command": [
               "php-fpm"
             ],
@@ -972,8 +1146,7 @@
             "libtool",
             "linux-headers",
             "zlib-dev",
-            "unzip",
-            "zstd"
+            "unzip"
           ],
           "apt": [
             "libbz2-dev",
@@ -991,8 +1164,7 @@
             "automake",
             "libtool",
             "zlib1g-dev",
-            "unzip",
-            "zstd"
+            "unzip"
           ]
         },
         "config": {
@@ -1002,7 +1174,6 @@
             "display_startup_errors = Off",
             "log_errors = On",
             "error_log = /dev/stderr",
-            "log_errors_max_len = 1024",
             "ignore_repeated_errors = On",
             "ignore_repeated_source = Off",
             "html_errors = Off"
@@ -1054,6 +1225,20 @@
               "npm"
             ]
           },
+          "checks": [
+            [
+              "composer",
+              "--version"
+            ],
+            [
+              "npm",
+              "--version"
+            ],
+            [
+              "npx",
+              "--version"
+            ]
+          ],
           "config": {
             "/usr/local/etc/php/conf.d/zz-joomla-development.ini": [
               "error_reporting = E_ALL",
@@ -1092,6 +1277,9 @@
             "XDEBUG_MODE": "develop,debug"
           },
           "extensions": {
+            "check": [
+              "xdebug"
+            ],
             "install": [
               "pcntl",
               "sockets"
@@ -1121,6 +1309,13 @@
           "JOOMLA_INSTALLATION_DISABLE_LOCALHOST_CHECK": "1"
         },
         "extensions": {
+          "check": [
+            "apcu",
+            "imagick",
+            "memcached",
+            "redis",
+            "Zend OPcache"
+          ],
           "configure": {
             "gd": [
               "--with-freetype",
@@ -1164,6 +1359,12 @@
               "remoteAddress": true
             },
             "base": "php:8.5-apache",
+            "checks": [
+              [
+                "apache2ctl",
+                "-t"
+              ]
+            ],
             "command": [
               "apache2-foreground"
             ],
@@ -1187,6 +1388,12 @@
           },
           "fpm": {
             "base": "php:8.5-fpm",
+            "checks": [
+              [
+                "php-fpm",
+                "-t"
+              ]
+            ],
             "command": [
               "php-fpm"
             ],
@@ -1200,6 +1407,12 @@
           },
           "fpm-alpine": {
             "base": "php:8.5-fpm-alpine",
+            "checks": [
+              [
+                "php-fpm",
+                "-t"
+              ]
+            ],
             "command": [
               "php-fpm"
             ],

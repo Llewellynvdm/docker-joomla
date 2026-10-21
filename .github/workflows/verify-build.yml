@@ -29,6 +29,7 @@ jobs:
           ./tests/test-tags.sh
           ./tests/test-manifest.sh
           ./tests/test-build.sh
+          ./tests/test-cleanup.sh
       - name: Verify committed generated outputs
         env:
           GITHUB_TOKEN: ${{ github.token }}

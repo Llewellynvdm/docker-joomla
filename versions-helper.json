@@ -44,8 +44,7 @@
             "automake",
             "libtool",
             "zlib1g-dev",
-            "unzip",
-            "zstd"
+            "unzip"
           ],
           "apk": [
             "autoconf",
@@ -66,8 +65,7 @@
             "libtool",
             "linux-headers",
             "zlib-dev",
-            "unzip",
-            "zstd"
+            "unzip"
           ]
         },
         "extensions": {
@@ -92,7 +90,14 @@
               "--with-webp"
             ]
           },
-          "enable": []
+          "enable": [],
+          "check": [
+            "apcu",
+            "imagick",
+            "memcached",
+            "redis",
+            "Zend OPcache"
+          ]
         },
         "environment": {
           "JOOMLA_INSTALLATION_DISABLE_LOCALHOST_CHECK": "1"
@@ -110,7 +115,6 @@
             "display_startup_errors = Off",
             "log_errors = On",
             "error_log = /dev/stderr",
-            "log_errors_max_len = 1024",
             "ignore_repeated_errors = On",
             "ignore_repeated_source = Off",
             "html_errors = Off"
@@ -149,7 +153,13 @@
                 "RemoteIPInternalProxy 169.254.0.0/16",
                 "RemoteIPInternalProxy 127.0.0.0/8"
               ]
-            }
+            },
+            "checks": [
+              [
+                "apache2ctl",
+                "-t"
+              ]
+            ]
           },
           "fpm-alpine": {
             "base": "php:8.5-fpm-alpine",
@@ -160,7 +170,13 @@
               "configure": {
                 "ldap": []
               }
-            }
+            },
+            "checks": [
+              [
+                "php-fpm",
+                "-t"
+              ]
+            ]
           },
           "fpm": {
             "base": "php:8.5-fpm",
@@ -173,7 +189,13 @@
                   "--with-libdir=lib/${DEB_BUILD_MULTIARCH}"
                 ]
               }
-            }
+            },
+            "checks": [
+              [
+                "php-fpm",
+                "-t"
+              ]
+            ]
           }
         },
         "dev": {
@@ -224,6 +246,9 @@
             "install": [
               "pcntl",
               "sockets"
+            ],
+            "check": [
+              "xdebug"
             ]
           },
           "environment": {
@@ -263,7 +288,21 @@
             "apk": [
               "npm"
             ]
-          }
+          },
+          "checks": [
+            [
+              "composer",
+              "--version"
+            ],
+            [
+              "npm",
+              "--version"
+            ],
+            [
+              "npx",
+              "--version"
+            ]
+          ]
         },
         "volume": [
           "/var/www/html"
@@ -314,8 +353,7 @@
             "automake",
             "libtool",
             "zlib1g-dev",
-            "unzip",
-            "zstd"
+            "unzip"
           ],
           "apk": [
             "autoconf",
@@ -336,8 +374,7 @@
             "libtool",
             "linux-headers",
             "zlib-dev",
-            "unzip",
-            "zstd"
+            "unzip"
           ]
         },
         "extensions": {
@@ -364,6 +401,13 @@
           },
           "enable": [
             "opcache"
+          ],
+          "check": [
+            "apcu",
+            "imagick",
+            "memcached",
+            "redis",
+            "Zend OPcache"
           ]
         },
         "environment": {
@@ -382,7 +426,6 @@
             "display_startup_errors = Off",
             "log_errors = On",
             "error_log = /dev/stderr",
-            "log_errors_max_len = 1024",
             "ignore_repeated_errors = On",
             "ignore_repeated_source = Off",
             "html_errors = Off"
@@ -421,7 +464,13 @@
                 "RemoteIPInternalProxy 169.254.0.0/16",
                 "RemoteIPInternalProxy 127.0.0.0/8"
               ]
-            }
+            },
+            "checks": [
+              [
+                "apache2ctl",
+                "-t"
+              ]
+            ]
           },
           "fpm-alpine": {
             "base": "php:8.4-fpm-alpine",
@@ -432,7 +481,13 @@
               "configure": {
                 "ldap": []
               }
-            }
+            },
+            "checks": [
+              [
+                "php-fpm",
+                "-t"
+              ]
+            ]
           },
           "fpm": {
             "base": "php:8.4-fpm",
@@ -445,7 +500,13 @@
                   "--with-libdir=lib/${DEB_BUILD_MULTIARCH}"
                 ]
               }
-            }
+            },
+            "checks": [
+              [
+                "php-fpm",
+                "-t"
+              ]
+            ]
           }
         },
         "dev": {
@@ -496,6 +557,9 @@
             "install": [
               "pcntl",
               "sockets"
+            ],
+            "check": [
+              "xdebug"
             ]
           },
           "environment": {
@@ -535,7 +599,21 @@
             "apk": [
               "npm"
             ]
-          }
+          },
+          "checks": [
+            [
+              "composer",
+              "--version"
+            ],
+            [
+              "npm",
+              "--version"
+            ],
+            [
+              "npx",
+              "--version"
+            ]
+          ]
         },
         "volume": [
           "/var/www/html"
@@ -586,8 +664,7 @@
             "automake",
             "libtool",
             "zlib1g-dev",
-            "unzip",
-            "zstd"
+            "unzip"
           ],
           "apk": [
             "autoconf",
@@ -608,8 +685,7 @@
             "libtool",
             "linux-headers",
             "zlib-dev",
-            "unzip",
-            "zstd"
+            "unzip"
           ]
         },
         "extensions": {
@@ -636,6 +712,13 @@
           },
           "enable": [
             "opcache"
+          ],
+          "check": [
+            "apcu",
+            "imagick",
+            "memcached",
+            "redis",
+            "Zend OPcache"
           ]
         },
         "environment": {
@@ -654,7 +737,6 @@
             "display_startup_errors = Off",
             "log_errors = On",
             "error_log = /dev/stderr",
-            "log_errors_max_len = 1024",
             "ignore_repeated_errors = On",
             "ignore_repeated_source = Off",
             "html_errors = Off"
@@ -693,7 +775,13 @@
                 "RemoteIPInternalProxy 169.254.0.0/16",
                 "RemoteIPInternalProxy 127.0.0.0/8"
               ]
-            }
+            },
+            "checks": [
+              [
+                "apache2ctl",
+                "-t"
+              ]
+            ]
           },
           "fpm-alpine": {
             "base": "php:8.3-fpm-alpine",
@@ -704,7 +792,13 @@
               "configure": {
                 "ldap": []
               }
-            }
+            },
+            "checks": [
+              [
+                "php-fpm",
+                "-t"
+              ]
+            ]
           },
           "fpm": {
             "base": "php:8.3-fpm",
@@ -717,7 +811,13 @@
                   "--with-libdir=lib/${DEB_BUILD_MULTIARCH}"
                 ]
               }
-            }
+            },
+            "checks": [
+              [
+                "php-fpm",
+                "-t"
+              ]
+            ]
           }
         },
         "dev": {
@@ -768,6 +868,9 @@
             "install": [
               "pcntl",
               "sockets"
+            ],
+            "check": [
+              "xdebug"
             ]
           },
           "environment": {
@@ -807,7 +910,21 @@
             "apk": [
               "npm"
             ]
-          }
+          },
+          "checks": [
+            [
+              "composer",
+              "--version"
+            ],
+            [
+              "npm",
+              "--version"
+            ],
+            [
+              "npx",
+              "--version"
+            ]
+          ]
         },
         "volume": [
           "/var/www/html"
@@ -833,6 +950,32 @@
           "latest"
         ],
         "package": "https://github.com/joomla/joomla-cms/releases/download/6.2.0/Joomla_6.2.0-Stable-Full_Package.tar.zst"
+      }
+    },
+    "archives": {
+      "tar.zst": {
+        "apt": [
+          "zstd"
+        ],
+        "apk": [
+          "zstd"
+        ]
+      },
+      "tar.gz": {
+        "apt": [
+          "gzip"
+        ],
+        "apk": [
+          "gzip"
+        ]
+      },
+      "tar.bz2": {
+        "apt": [
+          "bzip2"
+        ],
+        "apk": [
+          "bzip2"
+        ]
       }
     }
   },
@@ -881,8 +1024,7 @@
             "automake",
             "libtool",
             "zlib1g-dev",
-            "unzip",
-            "zstd"
+            "unzip"
           ],
           "apk": [
             "autoconf",
@@ -903,8 +1045,7 @@
             "libtool",
             "linux-headers",
             "zlib-dev",
-            "unzip",
-            "zstd"
+            "unzip"
           ]
         },
         "extensions": {
@@ -931,6 +1072,13 @@
           },
           "enable": [
             "opcache"
+          ],
+          "check": [
+            "apcu",
+            "imagick",
+            "memcached",
+            "redis",
+            "Zend OPcache"
           ]
         },
         "environment": {
@@ -949,7 +1097,6 @@
             "display_startup_errors = Off",
             "log_errors = On",
             "error_log = /dev/stderr",
-            "log_errors_max_len = 1024",
             "ignore_repeated_errors = On",
             "ignore_repeated_source = Off",
             "html_errors = Off"
@@ -988,7 +1135,13 @@
                 "RemoteIPInternalProxy 169.254.0.0/16",
                 "RemoteIPInternalProxy 127.0.0.0/8"
               ]
-            }
+            },
+            "checks": [
+              [
+                "apache2ctl",
+                "-t"
+              ]
+            ]
           },
           "fpm-alpine": {
             "base": "php:8.3-fpm-alpine",
@@ -999,7 +1152,13 @@
               "configure": {
                 "ldap": []
               }
-            }
+            },
+            "checks": [
+              [
+                "php-fpm",
+                "-t"
+              ]
+            ]
           },
           "fpm": {
             "base": "php:8.3-fpm",
@@ -1012,7 +1171,13 @@
                   "--with-libdir=lib/${DEB_BUILD_MULTIARCH}"
                 ]
               }
-            }
+            },
+            "checks": [
+              [
+                "php-fpm",
+                "-t"
+              ]
+            ]
           }
         },
         "volume": [
@@ -1064,8 +1229,7 @@
             "automake",
             "libtool",
             "zlib1g-dev",
-            "unzip",
-            "zstd"
+            "unzip"
           ],
           "apk": [
             "autoconf",
@@ -1086,8 +1250,7 @@
             "libtool",
             "linux-headers",
             "zlib-dev",
-            "unzip",
-            "zstd"
+            "unzip"
           ]
         },
         "extensions": {
@@ -1114,6 +1277,13 @@
           },
           "enable": [
             "opcache"
+          ],
+          "check": [
+            "apcu",
+            "imagick",
+            "memcached",
+            "redis",
+            "Zend OPcache"
           ]
         },
         "environment": {
@@ -1132,7 +1302,6 @@
             "display_startup_errors = Off",
             "log_errors = On",
             "error_log = /dev/stderr",
-            "log_errors_max_len = 1024",
             "ignore_repeated_errors = On",
             "ignore_repeated_source = Off",
             "html_errors = Off"
@@ -1171,7 +1340,13 @@
                 "RemoteIPInternalProxy 169.254.0.0/16",
                 "RemoteIPInternalProxy 127.0.0.0/8"
               ]
-            }
+            },
+            "checks": [
+              [
+                "apache2ctl",
+                "-t"
+              ]
+            ]
           },
           "fpm-alpine": {
             "base": "php:8.2-fpm-alpine",
@@ -1182,7 +1357,13 @@
               "configure": {
                 "ldap": []
               }
-            }
+            },
+            "checks": [
+              [
+                "php-fpm",
+                "-t"
+              ]
+            ]
           },
           "fpm": {
             "base": "php:8.2-fpm",
@@ -1195,7 +1376,13 @@
                   "--with-libdir=lib/${DEB_BUILD_MULTIARCH}"
                 ]
               }
-            }
+            },
+            "checks": [
+              [
+                "php-fpm",
+                "-t"
+              ]
+            ]
           }
         },
         "volume": [
@@ -1221,6 +1408,32 @@
           "5"
         ],
         "package": "https://github.com/joomla/joomla-cms/releases/download/5.4.10/Joomla_5.4.10-Stable-Full_Package.tar.zst"
+      }
+    },
+    "archives": {
+      "tar.zst": {
+        "apt": [
+          "zstd"
+        ],
+        "apk": [
+          "zstd"
+        ]
+      },
+      "tar.gz": {
+        "apt": [
+          "gzip"
+        ],
+        "apk": [
+          "gzip"
+        ]
+      },
+      "tar.bz2": {
+        "apt": [
+          "bzip2"
+        ],
+        "apk": [
+          "bzip2"
+        ]
       }
     }
   }

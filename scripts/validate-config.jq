@@ -8,7 +8,9 @@ def sha512: type == "string" and test("^[a-fA-F0-9]{128}$");
 def sha256: type == "string" and test("^[a-fA-F0-9]{64}$");
 def package_type: IN("tar.zst", "tar.gz", "tar.bz2");
 
-def safe_name: type == "string" and test("^[A-Za-z0-9_+./-]+$");
+def safe_name: type == "string" and test("^[A-Za-z0-9_+./-]+\\z");
+def module_name: type == "string" and test("^[A-Za-z0-9_][A-Za-z0-9_ -]*\\z");
+def command_arguments: type == "array" and length > 0 and all(.[]; type == "string" and (test("[\\r\\n]") | not)) and (.[0] | length > 0);
 def absolute_path: type == "string" and test("^/[A-Za-z0-9_./-]+$") and (split("/") | index("..") == null);
 def https: type == "string" and test("^https://[^[:space:]]+$");
 def image_config:
@@ -28,7 +30,7 @@ def image_config:
       else . end)
   | require(([.pie // {} | keys[]] + [.pecl // {} | keys[]] | length) == ([.pie // {} | keys[]] + [.pecl // {} | keys[]] | unique | length); "duplicate installer ownership")
   | if .download != null then .download |= with_entries(
-      require(.key | safe_name; "invalid download name")
+      require(.key | test("^[a-z][a-z0-9_]*\\z") and . != "joomla"; "invalid or reserved download name")
       | .value |= (
           require(.version | version_number; "invalid download version")
           | require(.package | https; "download requires an explicit HTTPS URL")
@@ -38,8 +40,10 @@ def image_config:
           | if $mode == "resolved" then require(.sha256 | sha256; "missing download checksum") else . end)) else . end
   | if .config != null then require(.config | type == "object" and all(to_entries[]; (.key | absolute_path) and (.value | type == "array" and all(.[]; type == "string" and (contains("\n") | not)))); "invalid configuration file") else . end
   | if .environment != null then require(.environment | type == "object" and all(to_entries[]; (.key | test("^[A-Z_][A-Z0-9_]*$")) and (.value | type == "string")); "invalid environment defaults") else . end
+  | if .checks != null then require(.checks | type == "array" and all(.[]; command_arguments); "invalid image check commands") else . end
   | if .extensions != null then
       reduce ["install", "enable"][] as $kind (.; if .extensions[$kind] != null then require(.extensions[$kind] | type == "array" and all(.[]; safe_name); "invalid bundled extension list") else . end)
+      | if .extensions.check != null then require(.extensions.check | type == "array" and all(.[]; module_name); "invalid extension checks") else . end
     else . end;
 
 require(type == "object" and length > 0; "configuration must contain at least one Joomla series")
@@ -54,6 +58,16 @@ require(type == "object" and length > 0; "configuration must contain at least on
         require(type == "object"; "\($series): configuration must be an object")
         | .packageType = (if .packageType == null then "tar.bz2" else .packageType end)
         | require(.packageType | package_type; "\($series): unsupported packageType")
+        | require(.archives | type == "object" and length > 0; "\($series): missing archive dependencies")
+        | .archives |= with_entries(
+            require(.key | package_type; "\($series): unsupported archive type")
+            | .value |= (
+                require(type == "object"; "\($series): invalid archive dependencies")
+                | reduce ["apt", "apk"][] as $manager (.;
+                    require(.[$manager] | type == "array" and all(.[]; safe_name); "\($series): invalid archive package list"))
+              )
+          )
+        | require(.archives[.packageType] != null; "\($series): missing dependencies for selected packageType")
         | require(.phpVersions | type == "object" and length > 0; "\($series): phpVersions must be a nonempty object")
         | require(.php | type == "string"; "\($series): php must be a string")
         | require(.phpVersions[.php] != null; "\($series): default PHP must be in phpVersions")
@@ -91,6 +105,7 @@ require(type == "object" and length > 0; "configuration must contain at least on
         | require(.variants | index($defaultVariant) != null; "\($series): default variant must be in variants")
         | require(.states | type == "object" and length > 0; "\($series): states must be a nonempty object")
         | .packageType as $packageType
+        | .archives as $archives
         | .states |= with_entries(
             .key as $state
             | require($state | IN("stable", "alpha", "beta", "rc"); "\($series): unsupported release state \($state)")
@@ -107,6 +122,7 @@ require(type == "object" and length > 0; "configuration must contain at least on
                 | require(all(.aliases[]; length > 0); "\($series)/\($state): empty alias")
                 | .packageType = (if .packageType == null then $packageType else .packageType end)
                 | require(.packageType | package_type; "\($series)/\($state): unsupported packageType")
+                | require($archives[.packageType] != null; "\($series)/\($state): missing dependencies for selected packageType")
                 | if .package != null then
                     require(.package | type == "string" and test("^https://[^[:space:]]+$"); "\($series)/\($state): package must be an HTTPS URL")
                   else . end

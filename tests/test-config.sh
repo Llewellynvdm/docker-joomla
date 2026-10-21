@@ -52,15 +52,32 @@ reject '.variant = [.variant]'
 reject '.packageType = "zip"'
 reject '.packageType = false'
 reject '.states.stable.packageType = false'
+reject 'del(.archives)'
+reject '.archives.zip = {apt: [], apk: []}'
+reject '.archives[.packageType].apt = ["zstd; command"]'
+reject '.archives[.packageType].apt = ["zstd\n"]'
+reject 'del(.archives[.packageType].apk)'
+reject 'del(.archives[.packageType])'
+reject '.states.stable.packageType = "tar.gz" | del(.archives["tar.gz"])'
 reject '.phpVersions[.php].pie["phpredis/phpredis"] = "latest"'
 reject '.phpVersions[.php].download.pie.sha256 = "invalid"'
 reject '.phpVersions[.php].download.pie.version = "latest"'
+reject '.phpVersions[.php].download["bad-name"] = .phpVersions[.php].download.pie'
+reject '.phpVersions[.php].download.PIE = .phpVersions[.php].download.pie'
+reject '.phpVersions[.php].download["pie\n"] = .phpVersions[.php].download.pie'
+reject '.phpVersions[.php].download.joomla = .phpVersions[.php].download.pie'
 reject 'del(.phpVersions[.php].download.pie.package)'
 reject '.phpVersions[.php].download.pie.package = "http://example.test/pie.phar"'
 reject '.phpVersions[.php].sources = {}'
 reject '.phpVersions[.php].npm.npm = "latest"'
 reject '.phpVersions[.php].pecl = .phpVersions[.php].pie'
 reject '.phpVersions[.php].apt = ["package;command"]'
+reject '.phpVersions[.php].extensions.check = ["imagick;command"]'
+reject '.phpVersions[.php].extensions.check = ["imagick\nxdebug"]'
+reject '.phpVersions[.php].extensions.check = ["imagick\n"]'
+reject '.phpVersions[.php].checks = [["php", "--version\ninvalid"]]'
+reject '.phpVersions[.php].checks = [[]]'
+reject '.phpVersions[.php].checks = ["php --version"]'
 reject '.phpVersions[.php].download.pie.destination = "/tmp/../bin/pie"'
 reject '.states = {}'
 for change in '.states.stable.aliases = []' '.states.stable.aliases = null' 'del(.states.stable.aliases)' 'del(.states.stable)'; do
@@ -68,4 +85,9 @@ for change in '.states.stable.aliases = []' '.states.stable.aliases = null' 'del
     jq "$change" "$work/settings.json" > "$work/valid.json"
     check "$work/valid.json"
 done
+test_case="accept PHP module names and literal command arguments"
+jq '.phpVersions[.php].extensions.check = ["Zend OPcache", "xdebug"]
+    | .phpVersions[.php].checks = [["php", "-r", "echo \"a quoted argument\";"]]' \
+    "$work/settings.json" > "$work/valid.json"
+check "$work/valid.json"
 echo 'Configuration validation tests passed.'

@@ -30,7 +30,7 @@ render_dockerfile() (
     | $settings.phpVersions[$php]
     | if $development == "1" then merge(.dev) else . end
     | merge(.variants[$variant])
-    | {image: ., release: $settings.states[$state]}
+    | {image: ., release: $settings.states[$state], archives: $settings.archives}
   ' "$configuration")"
   image="$(jq -c '.image' <<<"$selected")"
   release="$(jq -c '.release' <<<"$selected")"
@@ -67,21 +67,57 @@ render_dockerfile() (
   }
   steps=()
   step() { steps+=("$1"); }
+  # Continue arguments on separate lines without introducing extra image layers.
+  list_step() {
+    local command=$1 value
+    shift
+    for value; do command+=$' \\\n\t\t'"$(quote "$value")"; done
+    step "$command"
+  }
+  json_step() {
+    local command=$1 expression=$2
+    local -a values=()
+    mapfile -t values < <(jq -r "$expression | .[]" <<<"$image")
+    if (( ${#values[@]} )) || [[ ${3:-} == always ]]; then list_step "$command" "${values[@]}"; fi
+  }
+  emit_run() {
+    local line
+    printf 'RUN set -eux'
+    for line in "${steps[@]}"; do printf '; \\\n\t%s' "$line"; done
+    printf '\n\n'
+    steps=()
+  }
+  append_cleanup() {
+    local line command='' ending='; '
+    ending+="\\"
+    # A semicolon ending a continued line separates commands, while other
+    # continuations belong to the same readable pipeline or substitution.
+    while IFS= read -r line; do
+      line="${line#"${line%%[![:space:]]*}"}"
+      [[ -n $line && $line != \#* && $line != "\\" ]] || continue
+      if [[ $line == *"$ending" ]]; then
+        command+="${line%"$ending"}"
+        step "$command"
+        command=''
+      else
+        command+="$line"$'\n\t\t'
+      fi
+    done < "$script_dir/scripts/cleanup-$manager.inc"
+    if [[ -n $command ]]; then step "${command%$'\n\t\t'}"; fi
+  }
 
   manager=apt
   if [[ $variant == *alpine* ]]; then manager=apk; fi
   if [[ $manager == apt ]]; then
     step 'export DEBIAN_FRONTEND=noninteractive'
     step 'apt-get update'
-    packages="$(json_words '.apt // []')"
-    if [[ -n $packages ]]; then step "apt-get install -y --no-install-recommends $packages"; fi
+    json_step 'apt-get install -y --no-install-recommends' '.apt // []'
     step 'savedAptMark="$(apt-mark showmanual)"'
-    step 'apt-get install -y --no-install-recommends $PHPIZE_DEPS '"$(json_words '.build.apt')"
+    json_step 'apt-get install -y --no-install-recommends $PHPIZE_DEPS' '.build.apt' always
     step 'DEB_BUILD_MULTIARCH="$(dpkg-architecture --query DEB_BUILD_MULTIARCH)"'
   else
-    packages="$(json_words '.apk // []')"
-    if [[ -n $packages ]]; then step "apk add --no-cache $packages"; fi
-    step 'apk add --no-cache --virtual .build-deps $PHPIZE_DEPS '"$(json_words '.build.apk')"
+    json_step 'apk add --no-cache' '.apk // []'
+    json_step 'apk add --no-cache --virtual .build-deps $PHPIZE_DEPS' '.build.apk' always
   fi
   while IFS= read -r extension; do
     name="$(jq -r '.key' <<<"$extension")"
@@ -95,22 +131,27 @@ render_dockerfile() (
         args+=("$(quote "$value")")
       fi
     done < <(jq -c '.value[]' <<<"$extension")
-    step "docker-php-ext-configure $(quote "$name") ${args[*]}"
+    command="docker-php-ext-configure $(quote "$name")"
+    if (( ${#args[@]} )); then command+=" ${args[*]}"; fi
+    step "$command"
   done < <(jq -c '.extensions.configure // {} | to_entries[]' <<<"$image")
-  packages="$(json_words '.extensions.install // []')"
-  if [[ -n $packages ]]; then step 'docker-php-ext-install -j "$(nproc)" '"$packages"; fi
+  json_step 'docker-php-ext-install -j "$(nproc)"' '.extensions.install // []'
 
-  fetch="curl --fail --show-error --silent --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 300 --proto '=https' --proto-redir '=https'"
+  fetch=$'curl --fail --show-error --silent --location \\\n\t\t--retry 3 --retry-all-errors --connect-timeout 15 --max-time 300 \\\n\t\t--proto \'=https\' --proto-redir \'=https\' \\\n\t\t'
   temporary=()
+  declarations=()
   while IFS= read -r download; do
     name="$(jq -r '.key' <<<"$download")"
     item="$(jq -c '.value' <<<"$download")"
+    variable="${name^^}"
+    declarations+=("ARG ${variable}_URL=$(jq -c '.package' <<<"$item")")
+    declarations+=("ARG ${variable}_SHA256=$(jq -r '.sha256' <<<"$item")")
     destination="$(jq -r '.destination' <<<"$item")"
     type="$(jq -r '.type' <<<"$item")"
     target="/tmp/download-$name"
     if [[ $type == binary ]]; then target=$destination; fi
-    step "$fetch $(quote "$(jq -r '.package' <<<"$item")") -o $(quote "$target")"
-    step "echo $(quote "$(jq -r '.sha256' <<<"$item")  $target") | sha256sum -c -"
+    step "$fetch\"\$${variable}_URL\" --output $(quote "$target")"
+    step "printf '%s  %s\\n' \"\$${variable}_SHA256\" $(quote "$target") | sha256sum -c -"
     if [[ $type == binary ]]; then
       step "chmod 0755 $(quote "$target")"
     else
@@ -135,49 +176,40 @@ render_dockerfile() (
       fi
     done < <(jq -c --arg installer "$installer" '.[$installer] // {} | to_entries[]' <<<"$image")
   done
-  packages="$(json_words '.extensions.enable // []')"
-  if [[ -n $packages ]]; then step "docker-php-ext-enable $packages"; fi
+  json_step 'docker-php-ext-enable' '.extensions.enable // []'
   packages="$(json_words '.npm // {} | to_entries | map(.key + "@" + .value)')"
   if [[ -n $packages ]]; then
     step "npm_config_cache=/tmp/joomla-npm npm install --global --prefix /usr/local --no-audit --no-fund --engine-strict $packages"
     step 'hash -r'
   fi
   step "rm -rf $(words "${temporary[@]}" /tmp/joomla-pie /tmp/joomla-npm /tmp/pear /root/.cache)"
-  package_type="$(jq -r '.packageType' <<<"$release")"
-  archive="/tmp/joomla.$package_type"
-  package="$(jq -r '.package' <<<"$release")"
-  sha512="$(jq -r '.sha512' <<<"$release")"
-  tar_option=''
-  if [[ $package_type == tar.zst ]]; then tar_option='--zstd '; fi
-  step "$fetch $(quote "$package") -o $(quote "$archive")"
-  step "echo $(quote "$sha512  $archive") | sha512sum -c -"
-  step 'mkdir -p /usr/src/joomla'
-  step "tar ${tar_option}-xf $(quote "$archive") -C /usr/src/joomla"
-  step "rm -f $(quote "$archive")"
-  step 'chown -R www-data:www-data /usr/src/joomla'
   step 'extDir="$(php-config --extension-dir)"'
+  append_cleanup
 
-  # Keep each cleanup pipeline together on one continued Dockerfile line.
-  cleanup="$(<"$script_dir/scripts/cleanup-$manager.inc")"$'\n'
-  continuation=$'\\\n'
-  cleanup="${cleanup//"; $continuation"/$';\n'}"
-  cleanup="${cleanup//"$continuation"/ }"
-  while IFS= read -r line; do
-    line="${line#"${line%%[![:space:]]*}"}"
-    line="${line%"${line##*[![:space:]]}"}"
-    if [[ -n $line && $line != \#* ]]; then step "${line%;}"; fi
-  done <<<"$cleanup"
-  step '! { ldd "$extDir"/*.so | grep "not found"; }'
-  step 'err="$(php --version 3>&1 1>&2 2>&3)"'
-  step '[ -z "$err" ]'
+  printf '# NOTE: THIS DOCKERFILE IS GENERATED VIA "build.sh". DO NOT EDIT.\n'
+  printf 'FROM %s\n\n' "$(jq -r '.base' <<<"$image")"
+  printf 'LABEL maintainer="%s"\n\n' "$(jq -r 'map("\(.firstname) \(.lastname) <\(.email)> (@\(.github))") | join(", ")' maintainers.json)"
+  # Alpine provides ash before runtime packages (including Bash) are installed.
+  shell=/bin/bash
+  if [[ $manager == apk ]]; then shell=/bin/sh; fi
+  printf 'SHELL ["%s", "-o", "pipefail", "-c"]\n\n' "$shell"
+  jq -r '.environment | to_entries[] | "ENV \(.key)=\(.value | tojson)"' <<<"$image"
+  printf '\n'
+  if (( ${#declarations[@]} )); then printf '%s\n' "${declarations[@]}"; fi
+  printf '\n'
+  printf '# Install PHP extensions and tools; remove temporary dependencies in this layer.\n'
+  emit_run
+
+  # Configure the final runtime before checking startup and every expected module.
+  mapfile -t directories < <(jq -r '.config // {} | keys | map(sub("/[^/]*$"; "") | if . == "" then "/" else . end) | unique[]' <<<"$image")
+  if (( ${#directories[@]} )); then list_step 'mkdir -p' "${directories[@]}"; fi
   while IFS= read -r config; do
     path="$(jq -r '.key' <<<"$config")"
-    directory="${path%/*}"
-    step "mkdir -p $(quote "${directory:-/}")"
     mapfile -t lines < <(jq -c '.value[]' <<<"$config")
     values=()
     for line in "${lines[@]}"; do values+=("$(jq -r '.' <<<"$line")"); done
-    step "printf '%s\\n' $(words "${values[@]}") > $(quote "$path")"
+    list_step "printf '%s\\n'" "${values[@]}"
+    steps[${#steps[@]}-1]+=$' \\\n\t\t> '"$(quote "$path")"
   done < <(jq -c '.config // {} | to_entries[]' <<<"$image")
   if jq -e '.apache != null' <<<"$image" >/dev/null; then
     step "a2enmod $(json_words '.apache.modules')"
@@ -186,17 +218,59 @@ render_dockerfile() (
       step "find /etc/apache2 -type f -name '*.conf' -exec sed -ri 's/([[:space:]]*LogFormat[[:space:]]+\"[^\"]*)%h([^\"]*\")/\\1%a\\2/g' '{}' +"
     fi
   fi
+  step 'if ! php --version 2> /tmp/php-startup-errors.txt; then cat /tmp/php-startup-errors.txt >&2; exit 1; fi'
+  step 'if [ -s /tmp/php-startup-errors.txt ]; then cat /tmp/php-startup-errors.txt >&2; exit 1; fi'
+  while IFS= read -r name; do step "php --ri $(quote "$name") > /dev/null"; done < <(
+    jq -r '((.extensions.install // []) + (.extensions.check // [])) | unique[]' <<<"$image"
+  )
+  step 'rm -f /tmp/php-startup-errors.txt'
+  while IFS= read -r check; do
+    mapfile -t args < <(jq -r '.[]' <<<"$check")
+    step "$(words "${args[@]}")"
+  done < <(jq -c '.checks // [] | .[]' <<<"$image")
+  printf '# Configure and check PHP, extensions, tools and the web server after cleanup.\n'
+  emit_run
 
-  printf '# NOTE: THIS DOCKERFILE IS GENERATED VIA "build.sh". DO NOT EDIT.\n'
-  printf 'FROM %s\n' "$(jq -r '.base' <<<"$image")"
-  printf 'LABEL maintainer="%s"\n\n' "$(jq -r 'map("\(.firstname) \(.lastname) <\(.email)> (@\(.github))") | join(", ")' maintainers.json)"
-  jq -r '.environment | to_entries[] | "ENV \(.key)=\(.value | tojson)"' <<<"$image"
-  printf '\nENV JOOMLA_VERSION=%s\nENV JOOMLA_SHA512=%s\n\n' "$(jq -r '.version' <<<"$release")" "$sha512"
-  printf 'RUN set -eux'
-  for line in "${steps[@]}"; do printf '; \\\n\t%s' "$line"; done
-  printf '\n\nVOLUME %s\n' "$(jq -r '.volume | map(tojson) | "[" + join(", ") + "]"' <<<"$image")"
+  package_type="$(jq -r '.packageType' <<<"$release")"
+  archive="/tmp/joomla.$package_type"
+  mapfile -t packages < <(jq -r --arg type "$package_type" --arg manager "$manager" '.archives[$type][$manager][]' <<<"$selected")
+  if [[ $manager == apt ]]; then
+    step 'export DEBIAN_FRONTEND=noninteractive'
+    step 'savedAptMark="$(apt-mark showmanual)"'
+    if (( ${#packages[@]} )); then
+      step 'apt-get update'
+      list_step 'apt-get install -y --no-install-recommends' "${packages[@]}"
+    fi
+  elif (( ${#packages[@]} )); then
+    list_step 'apk add --no-cache --virtual .joomla-extract-deps' "${packages[@]}"
+  fi
+  step "$fetch\"\$JOOMLA_URL\" --output $(quote "$archive")"
+  step "printf '%s  %s\\n' \"\$JOOMLA_SHA512\" $(quote "$archive") | sha512sum -c -"
+  step 'mkdir -p /usr/src/joomla'
+  tar_option=''
+  if [[ $package_type == tar.zst ]]; then tar_option='--zstd '; fi
+  step "tar ${tar_option}-xf $(quote "$archive") -C /usr/src/joomla --no-same-owner"
+  step 'test -s /usr/src/joomla/index.php'
+  step 'test -s /usr/src/joomla/cli/joomla.php'
+  step 'chown -R www-data:www-data /usr/src/joomla'
+  step "rm -f $(quote "$archive")"
+  if [[ $manager == apt ]]; then
+    step "apt-mark auto '.*' > /dev/null"
+    step '[ -z "$savedAptMark" ] || apt-mark manual $savedAptMark'
+    step 'apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false'
+    step 'rm -rf /var/lib/apt/lists/*'
+  elif (( ${#packages[@]} )); then
+    step 'apk del --no-network .joomla-extract-deps'
+  fi
+  printf '# Joomla release changes reuse the PHP extension and configuration layers.\n'
+  printf 'ENV JOOMLA_VERSION=%s\n' "$(jq -r '.version' <<<"$release")"
+  printf 'ARG JOOMLA_URL=%s\n' "$(jq -c '.package' <<<"$release")"
+  printf 'ENV JOOMLA_SHA512=%s\n\n' "$(jq -r '.sha512' <<<"$release")"
+  emit_run
+
+  printf 'VOLUME %s\n' "$(jq -r '.volume | map(tojson) | "[" + join(", ") + "]"' <<<"$image")"
   printf 'WORKDIR %s\n' "$(jq -r '.workdir' <<<"$image")"
-  printf 'COPY docker-entrypoint.sh /entrypoint.sh\nCOPY makedb.php /makedb.php\n'
+  printf '\nCOPY --chmod=0755 docker-entrypoint.sh /entrypoint.sh\nCOPY --chmod=0644 makedb.php /makedb.php\n\n'
   printf 'ENTRYPOINT %s\n' "$(jq -r '.entrypoint | map(tojson) | "[" + join(", ") + "]"' <<<"$image")"
   printf 'CMD %s\n' "$(jq -r '.command | map(tojson) | "[" + join(", ") + "]"' <<<"$image")"
 )
