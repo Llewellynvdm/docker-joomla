@@ -10,18 +10,19 @@ No external INI file or configuration mount is needed to start debugging.
 
 | Work | Included tools |
 | --- | --- |
-| PHP development and debugging | Composer, PIE (PHP Installer for Extensions), Xdebug and the normal Joomla PHP extensions |
+| PHP development and debugging | Composer, Xdebug, PCNTL, sockets and the normal Joomla PHP extensions |
 | Frontend development | Node.js, npm, npx, Python 3, make and g++ for native npm modules |
 | Repository and file work | Git, OpenSSH client, patch, zip, unzip, rsync, jq, less and nano |
-| Database inspection | MariaDB/MySQL, PostgreSQL and SQLite command-line clients |
 
-Node.js follows the distribution used by the matching PHP base image. npm,
-Composer, PIE and Xdebug versions are selected in `versions-helper.json`; the update
+Node.js follows the distribution used by the matching PHP base image.
+Packages, download URLs, extension versions and configuration are selected per PHP version in `versions-helper.json`; the update
 scripts resolve their download checksums automatically.
 
 Xdebug is installed with PIE from its official GitHub release tag. `versions.json` records
 the archive URL and SHA256 together, and the Dockerfile uses that exact pair.
 The next update refreshes older Xdebug hashes that have no matching source URL.
+
+PIE is a temporary build tool: it installs verified extension sources without interaction, then is removed with its workspace in the same build layer. The compiled extensions are enabled using `docker-php-ext-enable`. Database command-line clients are optional deployment additions and are not bundled.
 
 ## Switch between normal and development images
 

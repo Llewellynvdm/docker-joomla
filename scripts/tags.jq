@@ -64,7 +64,7 @@ require(type == "object" and length > 0; "versions.json must contain configured 
     | require($variant == "apache" or $variant == "fpm" or $variant == "fpm-alpine";
         "\($series): unsupported runtime variant")
     | context_tags($names; $php; $variant; $php == $settings.php and $variant == $settings.variant) as $tags
-    | (if ($settings.development // null) == null then [false] else [false, true] end)[] as $development
+    | (if ($settings.phpVersions[$php].dev // null) == null then [false] else [false, true] end)[] as $development
     | {
         series: $series,
         state: $state,

@@ -9,12 +9,12 @@ trap 'rm -rf "$work"' EXIT
 test_case="maintained helper and resolved snapshot are valid"
 # Validate the maintained helper and the current resolved snapshot independently.
 jq --arg mode helper -f "$repo/scripts/validate-config.jq" "$repo/versions-helper.json" >/dev/null
-jq --slurpfile helper "$repo/versions-helper.json" --arg fixture current \
+jq --arg fixture current \
     -f "$repo/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repo/versions.json}" \
     | jq --arg mode resolved -f "$repo/scripts/validate-config.jq" >/dev/null
 
 # Malformed input cases use one isolated fake series, never a maintained release.
-jq --slurpfile helper "$repo/versions-helper.json" --arg fixture synthetic \
+jq --arg fixture synthetic \
     -f "$repo/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repo/versions.json}" \
     | jq '.["100.0"]' > "$work/settings.json"
 check() {
@@ -52,15 +52,15 @@ reject '.variant = [.variant]'
 reject '.packageType = "zip"'
 reject '.packageType = false'
 reject '.states.stable.packageType = false'
-reject '.phpVersions[.php].pecl.redis = "latest"'
-for tool in composer pie xdebug npm; do
-    reject ".development.$tool.sha256 = \"invalid\""
-    reject ".development.$tool.version = \"latest\""
-    reject "del(.development.$tool.package)"
-done
-reject '.development.pie.package = "http://example.test/pie.phar"'
-reject '.development.xdebug.package = "https://xdebug.org/files/xdebug-100.0.0.tgz"'
-reject '.development.xdebug.package = "https://github.com/xdebug/xdebug/archive/refs/tags/100.0.1.tar.gz"'
+reject '.phpVersions[.php].pie["phpredis/phpredis"] = "latest"'
+reject '.phpVersions[.php].download.pie.sha256 = "invalid"'
+reject '.phpVersions[.php].download.pie.version = "latest"'
+reject 'del(.phpVersions[.php].download.pie.package)'
+reject '.phpVersions[.php].download.pie.package = "http://example.test/pie.phar"'
+reject '.phpVersions[.php].sources["imagick/imagick"].sha256 = "invalid"'
+reject '.phpVersions[.php].pecl = .phpVersions[.php].pie'
+reject '.phpVersions[.php].apt = ["package;command"]'
+reject '.phpVersions[.php].download.pie.destination = "/tmp/../bin/pie"'
 reject '.states = {}'
 for change in '.states.stable.aliases = []' '.states.stable.aliases = null' 'del(.states.stable.aliases)' 'del(.states.stable)'; do
     test_case="accept optional release setting: $change"

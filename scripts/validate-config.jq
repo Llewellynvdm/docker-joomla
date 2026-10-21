@@ -8,6 +8,44 @@ def sha512: type == "string" and test("^[a-fA-F0-9]{128}$");
 def sha256: type == "string" and test("^[a-fA-F0-9]{64}$");
 def package_type: IN("tar.zst", "tar.gz", "tar.bz2");
 
+def safe_name: type == "string" and test("^[A-Za-z0-9_+./-]+$");
+def absolute_path: type == "string" and test("^/[A-Za-z0-9_./-]+$") and (split("/") | index("..") == null);
+def https: type == "string" and test("^https://[^[:space:]]+$");
+def image_config:
+  require(type == "object"; "image configuration must be an object")
+  | require(has("development") | not; "use per-PHP dev settings")
+  | reduce ["apt", "apk"][] as $manager (.;
+      if .[$manager] != null then require(.[$manager] | type == "array" and all(.[]; safe_name); "invalid system package list") else . end
+      | if .build[$manager] != null then require(.build[$manager] | type == "array" and all(.[]; safe_name); "invalid build package list") else . end)
+  | reduce ["pie", "pecl"][] as $installer (.;
+      if .[$installer] != null then
+        require(.[$installer] | type == "object"; "installer group must be an object")
+        | .[$installer] as $packages
+        | reduce ($packages | keys[]) as $name (.;
+            require($name | safe_name; "invalid extension package name")
+            | require($packages[$name] | version_number; "invalid extension version")
+            | require(.sources[$name].package | https; "extension requires an explicit HTTPS archive URL")
+            | require(.sources[$name].extension | safe_name; "invalid extension module")
+            | require(.sources[$name].ini | safe_name; "invalid extension INI name")
+            | if $mode == "resolved" then require(.sources[$name].sha256 | sha256; "missing extension checksum") else . end)
+      else . end)
+  | require(([.pie // {} | keys[]] + [.pecl // {} | keys[]] | length) == ([.pie // {} | keys[]] + [.pecl // {} | keys[]] | unique | length); "duplicate installer ownership")
+  | require(([.sources // {} | .[].extension] | length) == ([.sources // {} | .[].extension] | unique | length); "duplicate extension module")
+  | if .download != null then .download |= with_entries(
+      require(.key | safe_name; "invalid download name")
+      | .value |= (
+          require(.version | version_number; "invalid download version")
+          | require(.package | https; "download requires an explicit HTTPS URL")
+          | require(.destination | absolute_path; "invalid download destination")
+          | require(.type | IN("binary", "tar.gz", "node-package"); "unsupported download installation type")
+          | if .checksum != null then require(.checksum | https; "invalid published checksum URL") else . end
+          | if $mode == "resolved" then require(.sha256 | sha256; "missing download checksum") else . end)) else . end
+  | if .config != null then require(.config | type == "object" and all(to_entries[]; (.key | absolute_path) and (.value | type == "array" and all(.[]; type == "string" and (contains("\n") | not)))); "invalid configuration file") else . end
+  | if .environment != null then require(.environment | type == "object" and all(to_entries[]; (.key | test("^[A-Z_][A-Z0-9_]*$")) and (.value | type == "string")); "invalid environment defaults") else . end
+  | if .extensions != null then
+      reduce ["install", "enable"][] as $kind (.; if .extensions[$kind] != null then require(.extensions[$kind] | type == "array" and all(.[]; safe_name); "invalid bundled extension list") else . end)
+    else . end;
+
 require(type == "object" and length > 0; "configuration must contain at least one Joomla series")
 | if $mode == "helper" then
     require(all(.. | objects; (has("sha256") or has("sha512")) | not);
@@ -27,10 +65,28 @@ require(type == "object" and length > 0; "configuration must contain at least on
             .key as $php
             | require($php | test("^[0-9]+\\.[0-9]+$"); "\($series): invalid PHP version \($php)")
             | .value |= (
-                require(type == "object" and (.pecl | type == "object"); "\($series)/php\($php): missing PECL configuration")
-                | reduce ["imagick", "APCu", "memcached", "redis"][] as $extension (.;
-                    require(.pecl[$extension] | version_number; "\($series)/php\($php): invalid \($extension) version")
+                image_config
+                | require(.extensions | type == "object"; "missing bundled extension configuration")
+                | require(.build.apt | type == "array"; "missing APT build dependencies")
+                | require(.build.apk | type == "array"; "missing APK build dependencies")
+                | require(.workdir | absolute_path; "invalid workdir")
+                | require(.volume | type == "array" and all(.[]; absolute_path); "invalid volume paths")
+                | require(.entrypoint | type == "array" and length > 0 and all(.[]; type == "string"); "invalid entrypoint")
+                | require(.variants | type == "object"; "missing per-variant image configuration")
+                | .variants |= map_values(
+                    image_config
+                    | require(.base | type == "string" and test("^php:[a-zA-Z0-9_.-]+$"); "invalid PHP base image")
+                    | require(.command | type == "array" and length > 0 and all(.[]; type == "string"); "invalid runtime command")
                   )
+                | if .dev != null then .dev |= image_config else . end
+                | . as $base
+                | ((.pie // {}) + (.dev.pie // {})) as $pie
+                | ((.pecl // {}) + (.dev.pecl // {})) as $pecl
+                | require(all($pie | keys[]; . as $name | ($pecl | has($name) | not)); "duplicate installer ownership across dev settings")
+                | require(([$pie | keys[]] + [$pecl | keys[]] | map($base.sources[.] // $base.dev.sources[.]) | map(.extension) | length) == ([$pie | keys[]] + [$pecl | keys[]] | map($base.sources[.] // $base.dev.sources[.]) | map(.extension) | unique | length); "duplicate extension module across dev settings")
+                | if ($pie | length) > 0 then
+                    require(.download.pie.type == "binary" and .download.pie.temporary == true; "PIE must be a temporary binary download")
+                  else . end
               )
           )
         | require(.variants | type == "array" and length > 0; "\($series): variants must be a nonempty array")
@@ -39,23 +95,6 @@ require(type == "object" and length > 0; "configuration must contain at least on
         | require(.variant | type == "string"; "\($series): default variant must be a string")
         | .variant as $defaultVariant
         | require(.variants | index($defaultVariant) != null; "\($series): default variant must be in variants")
-        | if .development != null then
-            require(($series | split(".") | map(tonumber)) >= [6,2]; "\($series): development variants require Joomla 6.2 or later")
-            | require(.development | type == "object"; "\($series): development must be an object")
-            | reduce ["composer", "pie", "xdebug", "npm"][] as $tool (.;
-                require(.development[$tool].version | version_number; "\($series): invalid \($tool) version")
-                | if $mode == "resolved" then
-                    require(.development[$tool].sha256 | sha256; "\($series): missing or invalid \($tool) SHA256")
-                    | .development[$tool].sha256 |= ascii_downcase
-                    | require(.development[$tool].package | type == "string" and test("^https://[^[:space:]]+$");
-                        "\($series): missing or invalid \($tool) package URL; run ./update.sh")
-                    | if $tool == "xdebug" then
-                        require(.development.xdebug.package == ("https://github.com/xdebug/xdebug/archive/refs/tags/" + .development.xdebug.version + ".tar.gz");
-                          "\($series): run ./versions.sh to resolve the Xdebug source archive and checksum")
-                      else . end
-                  else . end
-              )
-          else del(.development) end
         | require(.states | type == "object" and length > 0; "\($series): states must be a nonempty object")
         | .packageType as $packageType
         | .states |= with_entries(

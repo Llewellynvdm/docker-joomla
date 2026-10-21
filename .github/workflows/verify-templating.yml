@@ -20,7 +20,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install generator test dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gawk jq shellcheck
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 jq shellcheck
       - name: Test configuration, resolution, tags and templates
         run: |
           shellcheck update.sh versions.sh apply-templates.sh generate-stackbrew-library.sh tests/*.sh
@@ -33,12 +33,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          # The initial source-only migration retains the legacy generated snapshot.
-          # Image CI still regenerates and builds every active context in this case.
-          if ! jq -e 'all(.[]; type == "object" and has("states"))' versions.json >/dev/null; then
-            echo '::notice::Generator migration: run ./update.sh --force and commit the generated files before submitting an Official Images manifest. Image CI builds the new contexts directly.'
-            exit 0
-          fi
           ./update.sh
           jq -c -f scripts/tags.jq versions.json > "$RUNNER_TEMP/contexts.json"
           mapfile -t contexts < <(jq -r '.[].directory' "$RUNNER_TEMP/contexts.json")

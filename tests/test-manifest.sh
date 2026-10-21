@@ -8,7 +8,7 @@ trap 'rm -rf "$temporary"' EXIT
 mkdir -p "$temporary/repository/scripts" "$temporary/bin"
 cp "$repository/generate-stackbrew-library.sh" "$repository/maintainers.json" "$temporary/repository/"
 cp "$repository/scripts/"*.jq "$temporary/repository/scripts/"
-jq --slurpfile helper "$repository/versions-helper.json" --arg fixture current \
+jq --arg fixture current \
   -f "$repository/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repository/versions.json}" >"$temporary/repository/versions.json"
 
 # Stub only architecture discovery; the publication plan uses the active releases.

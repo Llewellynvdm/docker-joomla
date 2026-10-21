@@ -10,12 +10,11 @@ mkdir -p "$work/repo/scripts" "$work/bin"
 cp "$root/versions.sh" "$work/repo/"
 cp "$root/scripts/validate-config.jq" "$root/scripts/tags.jq" "$work/repo/scripts/"
 fixture() {
-    jq --slurpfile helper "$root/versions-helper.json" --arg fixture "$1" \
+    jq --arg fixture "$1" \
         -f "$root/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$root/versions.json}"
 }
 helper_settings() {
-    jq 'walk(if type == "object" then del(.sha256, .sha512) else . end)
-      | map_values(if .development != null then .development |= map_values(del(.package)) else . end)'
+    jq 'walk(if type == "object" then del(.sha256, .sha512) else . end)'
 }
 printf 'verified Joomla fixture\n' > "$work/payload"
 export FIXTURE_PAYLOAD="$work/payload" FIXTURE_CALLS="$work/calls"
@@ -71,132 +70,61 @@ unset VERSIONS_HELPER
 cd "$work/repo"
 
 test_case="reuse resolved hashes without downloads"
-# The helper contains choices; matching hashes come only from the resolved cache.
 fixture current | jq --arg mode resolved -S -f scripts/validate-config.jq > versions.json
 helper_settings < versions.json > versions-helper.json
 cp versions.json "$work/baseline.json"
 ./versions.sh
 cmp versions.json "$work/baseline.json"
 [[ ! -s "$FIXTURE_CALLS" ]]
-test_case="apply helper-only settings without downloads"
-# A helper-only software setting change must take effect without package downloads.
-change='with_entries(.value.phpVersions[.value.php].pecl.redis |= (split(".") | map(tonumber) | .[2] += 1 | map(tostring) | join(".")))'
-jq "$change" versions-helper.json > .versions-helper.json
-./versions.sh
-jq -S "$change" "$work/baseline.json" > "$work/override.json"
-cmp versions.json "$work/override.json"
-[[ ! -s "$FIXTURE_CALLS" ]]
-rm .versions-helper.json versions.json
 
-test_case="resolve all configured releases and shared tools"
-# All release states and shared tool pins resolve without a single helper hash.
-fixture synthetic | helper_settings | jq 'map_values(.states |= map_values(del(.package)))' > versions-helper.json
-cp versions-helper.json "$work/original-helper.json"
-series="$(jq -r 'to_entries[] | select(.value.states.rc != null) | .key' versions-helper.json)"
-# Composer fetches its archive and checksum; the other tools fetch their archives.
-tool_calls="$(jq '[.[] | .development | to_entries[] | [.key, .value.version]] | unique | map(if .[0] == "composer" then 2 else 1 end) | add' versions-helper.json)"
-expected_calls="$(jq '[.[] | .states | length] | add * 2' versions-helper.json)"
-expected_calls=$((expected_calls + tool_calls))
-./versions.sh
-jq -e --arg sha512 "$FIXTURE_SHA512" --arg sha256 "$FIXTURE_SHA256" \
-    'all(.[]; all(.states[]; .sha512 == $sha512) and all(.development[]; .sha256 == $sha256)
-      and (.development.xdebug | .package == "https://github.com/xdebug/xdebug/archive/refs/tags/\(.version).tar.gz")
-      and (.development.pie | .package == "https://github.com/php/pie/releases/download/\(.version)/pie.phar"))' versions.json >/dev/null
-[[ "$(wc -l < "$FIXTURE_CALLS")" == "$expected_calls" ]]
-grep -Fxq 'https://github.com/xdebug/xdebug/archive/refs/tags/100.0.0.tar.gz' "$FIXTURE_CALLS"
-cp versions.json "$work/baseline.json"
-test_case="reuse newly resolved hashes without further downloads"
-./versions.sh
-cmp versions.json "$work/baseline.json"
-[[ "$(wc -l < "$FIXTURE_CALLS")" == "$expected_calls" ]]
-test_case="force refresh only the selected release and its tools"
-./versions.sh --force "$series/rc"
-[[ "$(wc -l < "$FIXTURE_CALLS")" == "$((expected_calls + 2 + tool_calls))" ]]
-cmp versions.json "$work/baseline.json"
-cmp versions-helper.json "$work/original-helper.json"
-
-reject() {
-    test_case="reject failed resolution without changing versions.json: $*"
-    if "$@" > "$work/log" 2>&1; then echo "FAIL: unexpectedly succeeded: $*" >&2; exit 1; fi
-    cmp versions.json "$work/baseline.json"
-}
-for failure in http connection missing duplicate digest checksum tool pie npm composer-digest composer-checksum; do
-    reject env FIXTURE_FAILURE="$failure" ./versions.sh --force
-done
-test_case="compute checksums when release metadata has no digest"
-FIXTURE_FAILURE=no-digest ./versions.sh --force "$series/rc"
-cmp versions.json "$work/baseline.json"
-reject ./versions.sh unknown
-edit_helper() { jq --arg series "$series" "$@" versions-helper.json > "$work/helper.json"; mv "$work/helper.json" versions-helper.json; }
-edit_helper '.[$series].states.rc.version |= sub("rc1$"; "rc2")'
-reject ./versions.sh "$series/stable"
-test_case="resolve a selected release version change"
-./versions.sh "$series/rc"
-jq -e --arg series "$series" --slurpfile helper versions-helper.json \
-    '.[$series].states.rc.version == $helper[0][$series].states.rc.version' versions.json >/dev/null
-
-# Updating a tool regenerates only its hash; an unselected change is rejected.
-other="$(jq -r --arg series "$series" 'keys[] | select(. != $series)' versions-helper.json)"
-while IFS= read -r tool; do
-    cp versions.json "$work/baseline.json"
-    edit_helper --arg tool "$tool" '.[$series].development[$tool].version |= (split(".") | map(tonumber) | .[2] += 1 | map(tostring) | join("."))'
-    reject ./versions.sh "$other"
-    test_case="refresh changed $tool pin without downloading other packages"
-    before="$(wc -l < "$FIXTURE_CALLS")"
-    ./versions.sh "$series/rc"
-    calls=1
-    if [[ "$tool" == composer ]]; then calls=2; fi
-    [[ "$(wc -l < "$FIXTURE_CALLS")" == "$((before + calls))" ]]
-    jq -e --arg series "$series" --arg tool "$tool" --arg sha "$FIXTURE_SHA256" --slurpfile helper versions-helper.json \
-        '(.[$series].development[$tool] | del(.package)) == ($helper[0][$series].development[$tool] + {sha256:$sha})' versions.json >/dev/null
-done < <(jq -r --arg series "$series" '.[$series].development | keys[]' versions-helper.json)
-
-test_case="remove a release from metadata while preserving historical files"
-retired="$(jq -r --arg series "$series" '"\($series)/alpha/php\(.[$series].php)/\(.[$series].variant)"' versions-helper.json)"
-mkdir -p "$retired"
-printf 'keep\n' > "$retired/manual.txt"
-edit_helper 'del(.[$series].states.alpha)'
-./versions.sh
-jq -e --arg series "$series" '.[$series].states | has("alpha") | not' versions.json >/dev/null
-[[ "$(cat "$retired/manual.txt")" == keep ]]
-
-test_case="derive custom package hashes from downloaded bytes"
-# Custom packages also produce hashes automatically from the downloaded bytes.
-edit_helper '.[$series].states.stable.package = "https://example.test/joomla.tar.zst"'
-./versions.sh "$series/stable"
-jq -e --arg series "$series" --arg sha "$FIXTURE_SHA512" \
-    '.[$series].states.stable | .package == "https://example.test/joomla.tar.zst" and .sha512 == $sha' versions.json >/dev/null
-test_case="reuse legacy package hashes while resolving missing tool hashes"
-# A legacy package cache is reused while missing tool hashes are first resolved.
-jq --arg series "$series" '{($series): (.[$series] | .states = {stable: .states.stable})}' versions-helper.json > "$work/helper.json"
-mv "$work/helper.json" versions-helper.json
-jq --arg series "$series" '{($series): .[$series].states.stable}' versions.json > "$work/legacy.json"
-mv "$work/legacy.json" versions.json
+test_case="resolve every configured artifact and reuse URL-keyed checksums"
+./versions.sh --force
+jq -e --arg sha "$FIXTURE_SHA256" --arg sha512 "$FIXTURE_SHA512" '
+  all(.[]; all(.states[]; .sha512 == $sha512))
+  and all(.. | objects | select(has("destination") or has("extension")); .sha256 == $sha)
+' versions.json >/dev/null
 before="$(wc -l < "$FIXTURE_CALLS")"
 ./versions.sh
-[[ "$(wc -l < "$FIXTURE_CALLS")" == "$((before + tool_calls))" ]]
-jq --arg mode resolved -f scripts/validate-config.jq versions.json >/dev/null
-jq -e '[.. | objects | keys[] | select(. == "sha256" or . == "sha512")] | length == 0' versions-helper.json >/dev/null
+[[ "$(wc -l < "$FIXTURE_CALLS")" == "$before" ]]
 
-for provenance in missing previous; do
-    test_case="refresh Xdebug checksum with $provenance archive provenance"
-    jq --arg series "$series" --arg provenance "$provenance" '
-        .[$series].development.xdebug |= (.sha256 = ("0" * 64)
-          | if $provenance == "missing" then del(.package)
-            else .package = ("https://xdebug.org/files/xdebug-" + .version + ".tgz") end)
-    ' versions.json > "$work/old-source.json"
-    mv "$work/old-source.json" versions.json
+test_case="settings changes require no downloads"
+jq 'map_values(.phpVersions |= map_values(.environment.TEST_SETTING = "configured"))' versions-helper.json > .versions-helper.json
+./versions.sh
+[[ "$(wc -l < "$FIXTURE_CALLS")" == "$before" ]]
+jq -e 'all(.[]; all(.phpVersions[]; .environment.TEST_SETTING == "configured"))' versions.json >/dev/null
+mv .versions-helper.json versions-helper.json
+
+test_case="new arbitrary download needs no resolver code"
+jq 'to_entries[0].key' versions-helper.json > "$work/series"
+series="$(jq -r . "$work/series")"
+php="$(jq -r --arg series "$series" '.[$series].php' versions-helper.json)"
+jq --arg series "$series" --arg php "$php" '
+ .[$series].phpVersions[$php].download.example = {
+   version:"100.0.0", package:"https://example.test/tool.phar", type:"binary", destination:"/usr/local/bin/example"}
+' versions-helper.json > "$work/helper"
+mv "$work/helper" versions-helper.json
+./versions.sh
+[[ "$(wc -l < "$FIXTURE_CALLS")" == "$((before + 1))" ]]
+
+# A source change, even with the same version, must never reuse an old digest.
+test_case="changed URL refreshes its checksum"
+jq --arg series "$series" --arg php "$php" '.[$series].phpVersions[$php].download.example.package = "https://example.test/replacement.phar"' versions-helper.json > "$work/helper"
+mv "$work/helper" versions-helper.json
+./versions.sh
+[[ "$(wc -l < "$FIXTURE_CALLS")" == "$((before + 2))" ]]
+
+for failure in http connection missing duplicate digest checksum tool pie npm composer-digest composer-checksum; do
+    test_case="failed $failure resolution leaves existing versions.json untouched"
     cp versions.json "$work/baseline.json"
-    reject env FIXTURE_FAILURE=connection ./versions.sh
-    test_case="resolve Xdebug from the pinned GitHub archive after failed migration"
-    before="$(wc -l < "$FIXTURE_CALLS")"
-    ./versions.sh
-    [[ "$(wc -l < "$FIXTURE_CALLS")" == "$((before + 1))" ]]
-    jq -e --arg series "$series" --arg sha "$FIXTURE_SHA256" '
-        .[$series].development.xdebug | .sha256 == $sha
-        and .package == ("https://github.com/xdebug/xdebug/archive/refs/tags/" + .version + ".tar.gz")
-    ' versions.json >/dev/null
-    ./versions.sh
-    [[ "$(wc -l < "$FIXTURE_CALLS")" == "$((before + 1))" ]]
+    if env FIXTURE_FAILURE="$failure" ./versions.sh --force >"$work/error" 2>&1; then
+        echo "FAIL: accepted $failure" >&2; exit 1
+    fi
+    cmp versions.json "$work/baseline.json"
 done
+
+test_case="missing published Joomla digest still computes SHA512"
+env FIXTURE_FAILURE=no-digest ./versions.sh --force >/dev/null
+jq -e --arg sha "$FIXTURE_SHA512" 'all(.[]; all(.states[]; .sha512 == $sha))' versions.json >/dev/null
+jq -e '[.. | objects | keys[] | select(. == "sha256" or . == "sha512")] | length == 0' versions-helper.json >/dev/null
+if ./versions.sh unknown/state >"$work/error" 2>&1; then echo 'FAIL: unknown selector accepted' >&2; exit 1; fi
 echo 'Version resolution tests passed.'

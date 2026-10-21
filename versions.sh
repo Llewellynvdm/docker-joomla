@@ -47,8 +47,7 @@ selected() {
     return 1
 }
 
-# Existing resolved releases provide a cache; legacy versions.json is accepted
-# only as a cache during the first migration to the state-based layout.
+# Existing resolved releases provide a cache keyed by version and package URL.
 if [ -f versions.json ]; then jq -e 'type == "object"' versions.json > /dev/null; fi
 cp "$work/helper.json" "$work/result.json"
 fetch() {
@@ -74,9 +73,7 @@ for release in "${releases[@]}"; do
     cached='{}'
     if [ -f versions.json ]; then
         cached="$(jq -c --arg series "$series" --arg state "$state" '
-            .[$series] as $entry |
-            if $entry.states then $entry.states[$state] // {}
-            elif $state == "stable" then $entry // {} else {} end
+            .[$series].states[$state] // {}
         ' versions.json)"
     fi
     validCache=false
@@ -125,60 +122,38 @@ for release in "${releases[@]}"; do
     mv "$work/next.json" "$work/result.json"
 done
 
-# Development tools belong to the series, so a state selector refreshes its
-# shared tools too. Process selected series first to share a forced download.
-selectedSeries=()
-otherSeries=()
-while IFS= read -r series; do
-    if selected "$series"; then selectedSeries+=("$series"); else otherSeries+=("$series"); fi
-done < <(jq -r 'to_entries[] | select(.value.development != null) | .key' "$work/helper.json")
-declare -A toolHashes=()
-for series in "${selectedSeries[@]}" "${otherSeries[@]}"; do
-    for tool in composer pie xdebug npm; do
-        version="$(jq -r --arg series "$series" --arg tool "$tool" '.[$series].development[$tool].version' "$work/helper.json")"
-        case "$tool" in
-            composer) package="https://getcomposer.org/download/$version/composer.phar" ;;
-            pie) package="https://github.com/php/pie/releases/download/$version/pie.phar" ;;
-            xdebug) package="https://github.com/xdebug/xdebug/archive/refs/tags/$version.tar.gz" ;;
-            npm) package="https://registry.npmjs.org/npm/-/npm-$version.tgz" ;;
-        esac
-        key="$tool:$version"
-        if [[ ! -v "toolHashes[$key]" ]]; then
-            cached=
-            if [ -f versions.json ]; then
-                # A version alone cannot identify the bytes when a download source changes.
-                cached="$(jq -r --arg tool "$tool" --arg version "$version" --arg package "$package" '
-                    [.[] | .development[$tool] | select(.version == $version and .package == $package)
-                        | .sha256 | select(type == "string" and test("^[a-fA-F0-9]{64}$"))][0] // ""
-                ' versions.json)"
+# Resolve every configured artifact generically. The helper owns URLs and install
+# metadata; only the resulting file receives checksums. URL is the cache identity.
+declare -A artifactHashes=()
+while IFS=$'\t' read -r series path package checksumUrl; do
+    key="$package"
+    if [[ ! -v "artifactHashes[$key]" ]]; then
+        cached=
+        if [[ -f versions.json ]]; then
+            cached="$(jq -r --arg package "$package" '[.. | objects | select(.package? == $package) | .sha256? | select(type == "string" and test("^[a-fA-F0-9]{64}$"))][0] // ""' versions.json)"
+        fi
+        if [[ -n "$cached" ]] && { ! $force || ! selected "$series"; }; then
+            artifactHashes[$key]="${cached,,}"
+        else
+            if ! selected "$series"; then
+                echo "Unresolved artifact $package for $series; include it or update all series." >&2
+                exit 1
             fi
-            if [ -n "$cached" ] && { ! $force || ! selected "$series"; }; then
-                toolHashes[$key]="${cached,,}"
-            else
-                if ! selected "$series"; then
-                    echo "Unresolved or changed $tool $version for $series; include it or run ./update.sh without selectors." >&2
-                    exit 1
-                fi
-                echo "Resolving $tool $version ($series)" >&2
-                fetch "$package" -o "$work/tool"
-                checksum="$(sha256sum "$work/tool")"
-                toolHashes[$key]="${checksum%% *}"
-                if [ "$tool" = composer ]; then
-                    fetch "$package.sha256sum" -o "$work/tool.sha256sum"
-                    read -r expected filename < "$work/tool.sha256sum" || true
-                    [[ "$expected" =~ ^[a-fA-F0-9]{64}$ && "$filename" = composer.phar ]] \
-                        || { echo 'Invalid published Composer SHA256' >&2; exit 1; }
-                    printf '%s  %s\n' "$expected" "$work/tool" | sha256sum --check --status
-                fi
-                rm -f "$work/tool"
+            echo "Resolving $package ($series)" >&2
+            fetch "$package" -o "$work/artifact"
+            checksum="$(sha256sum "$work/artifact")"
+            artifactHashes[$key]="${checksum%% *}"
+            if [[ "$checksumUrl" != - ]]; then
+                fetch "$checksumUrl" -o "$work/published.sha256"
+                read -r expected _ < "$work/published.sha256" || true
+                [[ "$expected" =~ ^[a-fA-F0-9]{64}$ ]] || { echo 'Invalid published SHA256' >&2; exit 1; }
+                printf '%s  %s\n' "$expected" "$work/artifact" | sha256sum --check --status
             fi
         fi
-        jq --arg series "$series" --arg tool "$tool" --arg package "$package" --arg sha256 "${toolHashes[$key]}" '
-            .[$series].development[$tool] += {package: $package, sha256: $sha256}
-        ' "$work/result.json" > "$work/next.json"
-        mv "$work/next.json" "$work/result.json"
-    done
-done
+    fi
+    jq --argjson path "$path" --arg sha256 "${artifactHashes[$key]}" 'setpath($path + ["sha256"]; $sha256)' "$work/result.json" > "$work/next.json"
+    mv "$work/next.json" "$work/result.json"
+done < <(jq -r 'paths(objects) as $path | getpath($path) | select(has("destination") or has("extension")) | select(has("package")) | [$path[0], ($path | tojson), .package, (.checksum // "-")] | @tsv' "$work/helper.json")
 
 jq --arg mode resolved -S -f scripts/validate-config.jq "$work/result.json" > "$work/versions.json"
 mv "$work/versions.json" versions.json

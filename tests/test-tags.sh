@@ -8,11 +8,11 @@ trap 'printf "FAIL: %s:%s: %s\n" "${BASH_SOURCE[0]}" "$LINENO" "$BASH_COMMAND" >
 
 # Check the maintained matrix without reproducing the tag expansion algorithm.
 for fixture in current synthetic; do
-  jq --slurpfile helper "$repository/versions-helper.json" --arg fixture "$fixture" \
+  jq --arg fixture "$fixture" \
     -f "$repository/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repository/versions.json}" >"$temporary/config.json"
   if [[ "$fixture" == synthetic ]]; then
     # Tag-only fixtures use deliberately fictional PHP versions; no image is built.
-    jq 'map_values(.php = "100.0" | .phpVersions = {"100.0": {}, "100.1": {}}
+    jq 'map_values(.php = "100.0" | .phpVersions = {"100.0": {dev:{}}, "100.1": {}}
       | .variant = "apache" | .variants = ["apache", "fpm"])' "$temporary/config.json" >"$temporary/synthetic.json"
     mv "$temporary/synthetic.json" "$temporary/config.json"
   fi
@@ -21,8 +21,7 @@ for fixture in current synthetic; do
     . as $plan | $config[0] as $config
     | ([.[] | .tags[]] | length == (unique | length))
       and ([.[].directory] | length == (unique | length))
-      and (length == ([$config[] | (.phpVersions | length) * (.variants | length)
-        * (.states | length) * (if .development == null then 1 else 2 end)] | add))
+      and (length == ([$config[] | ([.phpVersions[] | if .dev == null then 1 else 2 end] | add) * (.variants | length) * (.states | length)] | add))
       and all(.[]; . as $context | .version == $config[.series].states[.state].version
         and ($config[.series].phpVersions | has($context.php))
         and ($config[.series].variants | index($context.variant) != null)
@@ -33,7 +32,7 @@ for fixture in current synthetic; do
         and .php == $config[.series].php and .variant == $config[.series].variant)
       and all(.[] | select(.development == false); . as $normal
         | ($plan | map(select(.directory == ($normal.directory + "-dev")))) as $siblings
-        | if $config[.series].development == null then $siblings == []
+        | if $config[.series].phpVersions[.php].dev == null then $siblings == []
           else ($siblings | length) == 1 and $siblings[0].tags ==
             (.tags | map(if . == "latest" then "dev" else . + "-dev" end)) end)
   ' "$temporary/plan.json" >/dev/null

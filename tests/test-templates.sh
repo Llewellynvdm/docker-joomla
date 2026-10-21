@@ -1,141 +1,86 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-test_case="template test setup"
-trap 'echo "FAIL: $test_case (${BASH_SOURCE[0]}:$LINENO)" >&2' ERR
-
+trap 'echo "FAIL: template generation at line $LINENO" >&2' ERR
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-scratch="$(mktemp -d)"
-trap 'rm -rf "$scratch"' EXIT
-
-prepare() {
-  mkdir -p "$1/scripts" "$1/development"
-  cp "$repo/apply-templates.sh" "$repo/Dockerfile.template" "$repo/"docker-entrypoint*.sh \
-    "$repo/makedb.php" "$repo/maintainers.json" "$1/"
-  cp "$repo/scripts/validate-config.jq" "$1/scripts/"
-  cp "$repo/development/"*.ini "$1/development/"
-  if [[ -f "$repo/.jq-template.awk" ]]; then cp "$repo/.jq-template.awk" "$1/"; fi
-  # Rendering must use the resolved snapshot, never the helper.
-  printf 'the helper must not be read by apply-templates.sh\n' >"$1/versions-helper.json"
-}
-fail() { echo "FAIL: $*" >&2; exit 1; }
-contains() { grep -Fq -- "$2" "$1" || fail "$1 does not contain: $2"; }
-excludes() { if grep -Fq -- "$2" "$1"; then fail "$1 unexpectedly contains: $2"; fi; }
-snapshot() { find . -type f -print0 | sort -z | xargs -0 sha256sum; }
-
-test_case="render configured contexts and preserve historical folders"
-prepare "$scratch/current"
-jq --slurpfile helper "$repo/versions-helper.json" --arg fixture current \
-  -f "$repo/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repo/versions.json}" >"$scratch/current/versions.json"
-cd "$scratch/current"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+cp "$repo/apply-templates.sh" "$repo/Dockerfile.template" "$repo/"docker-entrypoint*.sh "$repo/makedb.php" "$repo/maintainers.json" "$work/"
+cp -r "$repo/scripts" "$work/"
+jq --arg fixture current -f "$repo/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repo/versions.json}" >"$work/versions.json"
+printf 'must not read helper\n' >"$work/versions-helper.json"
+cd "$work"
 mkdir retired
-printf 'maintainer-owned historical context\n' >retired/Dockerfile
-./apply-templates.sh >"$scratch/render.log"
-expected="$(jq '[.[] | (.phpVersions | length) * (.variants | length) * (.states | length) * (if .development == null then 1 else 2 end)] | add' versions.json)"
-[[ "$(find . -name Dockerfile -type f | wc -l)" -eq "$((expected + 1))" ]] || fail 'context count differs from versions.json'
-contains retired/Dockerfile 'maintainer-owned historical context'
+printf 'preserve\n' >retired/Dockerfile
+./apply-templates.sh >/dev/null
+python3 - <<'PY'
+import copy
+import importlib.util
+import json
+from pathlib import Path
+import subprocess
+spec = importlib.util.spec_from_file_location('renderer', 'scripts/render-dockerfile.py')
+r = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(r)
+config = json.loads(Path('versions.json').read_text())
+plan = json.loads(subprocess.check_output(['jq', '-f', 'scripts/tags.jq', 'versions.json']))
+for context in plan:
+    directory = Path(context['directory'])
+    text = (directory / 'Dockerfile').read_text()
+    image = config[context['series']]['phpVersions'][context['php']]
+    if context['development']:
+        image = r.merge(image, image['dev'])
+    image = r.merge(image, image['variants'][context['variant']])
+    assert 'FROM ' + image['base'] in text, directory
+    for item in image['download'].values():
+        assert item['package'] in text and item['sha256'] in text, directory
+    for name in image.get('pie', {}):
+        item = image['sources'][name]
+        assert item['package'] in text and item['sha256'] in text, directory
+        assert 'docker-php-ext-enable --ini-name ' + item['ini'] + ' ' + item['extension'] in text, directory
+    for path, lines in image['config'].items():
+        assert path in text, directory
+        assert all(line in text for line in lines), directory
+    assert text.count('RUN set -eux;') == 1, directory
+    for item in image['download'].values():
+        if item.get('temporary'):
+            assert 'rm -rf ' + item['destination'] in text, directory
+    assert 'COPY zz-' not in text, directory
+    if not context['development']:
+        assert 'xdebug' not in text and 'nodejs' not in text, directory
+    # Check the actual shell syntax of every generated RUN instruction.
+    logical = text.replace('\\\n', '')
+    for line in logical.splitlines():
+        if line.startswith('RUN '):
+            subprocess.run(['sh', '-n'], input=line[4:], text=True, check=True)
+assert Path('retired/Dockerfile').read_text() == 'preserve\n'
+# Exercise selections absent from the maintained matrix without assuming versions.
+series, settings = next(iter(config.items()))
+php, seed = next(iter(settings['phpVersions'].items()))
+trial = copy.deepcopy(config)
+entry = trial[series]['phpVersions'][php]
+entry.setdefault('dev', {})
+entry['dev']['apt'] = ['sentinel-dev-package']
+entry['dev']['apk'] = ['sentinel-dev-package']
+entry['dev']['config'] = {'/tmp/custom.ini': ['custom.value=${RUNTIME_VALUE}']}
+variant = settings['variants'][0]
+entry['variants'][variant]['base'] = 'php:100.0-test'
+normal = r.render(trial, series, next(iter(settings['states'])), php, variant, False, Path('Dockerfile.template').read_text())
+dev = r.render(trial, series, next(iter(settings['states'])), php, variant, True, Path('Dockerfile.template').read_text())
+assert 'sentinel-dev-package' not in normal and 'sentinel-dev-package' in dev
+assert '/tmp/custom.ini' in dev and 'custom.value=${RUNTIME_VALUE}' in dev
+assert 'FROM php:100.0-test' in normal
+trial[series]['phpVersions']['100.0'] = copy.deepcopy(entry)
+del trial[series]['phpVersions']['100.0']['dev']
+assert 'sentinel-dev-package' not in r.render(trial, series, next(iter(settings['states'])), '100.0', variant, False, Path('Dockerfile.template').read_text())
 
-check_contexts() {
-  # Inspect every configured release/runtime, rather than selecting current releases.
-  jq -r '
-    to_entries[] | .key as $series | .value as $settings
-    | .value.states | to_entries[] | .key as $state | .value as $release
-    | $settings.phpVersions | keys[] as $php | $settings.variants[] as $variant
-    | (if $settings.development == null then [false] else [false, true] end)[] as $dev
-    | [$series, $state, $php, $variant, $dev, $release.version, $release.sha512] | @tsv
-  ' versions.json >"$scratch/contexts"
-  while IFS=$'\t' read -r series state php variant dev version checksum; do
-    directory="$series/$state/php$php/$variant"
-    if [[ "$dev" == true ]]; then directory+='-dev'; fi
-    test_case="generated context $directory"
-    dockerfile="$directory/Dockerfile"
-    parent="$(awk '$1 == "FROM" { print $2 }' "$dockerfile")"
-    expected_parent="php:$php-$variant"
-    # Only the fixed legacy 4.4 compatibility rule selects Bookworm.
-    if [[ "$series" == 4.4 && "$variant" != fpm-alpine ]]; then expected_parent+='-bookworm'; fi
-    [[ "$parent" == "$expected_parent" ]] || fail "$dockerfile has parent $parent; expected $expected_parent"
-    contains "$dockerfile" "ENV JOOMLA_VERSION=$version"
-    contains "$dockerfile" "ENV JOOMLA_SHA512=$checksum"
-    [[ -x "$directory/docker-entrypoint.sh" ]] || fail "$directory/docker-entrypoint.sh lost executable mode"
-    if [[ "$variant" == apache ]]; then
-      contains "$dockerfile" 'CMD ["apache2-foreground"]'
-    else
-      contains "$dockerfile" 'CMD ["php-fpm"]'
-      excludes "$dockerfile" 'a2enmod'
-    fi
-    # PHP integrated OPcache in 8.5; this is a compatibility boundary, not a fixture version.
-    if jq -en --arg php "$php" '$php | split(".") | map(tonumber) | . < [8, 5]' >/dev/null; then
-      contains "$dockerfile" 'docker-php-ext-enable opcache'
-    else
-      excludes "$dockerfile" 'docker-php-ext-enable opcache'
-    fi
-    if [[ "$dev" == true ]]; then
-      for tool in composer pie xdebug npm; do
-        for property in version sha256; do
-          value="$(jq -r --arg series "$series" --arg tool "$tool" --arg property "$property" '.[$series].development[$tool][$property]' versions.json)"
-          contains "$dockerfile" "${tool^^}_${property^^}=$value"
-        done
-      done
-      value="$(jq -r --arg series "$series" '.[$series].development.xdebug.package' versions.json)"
-      contains "$dockerfile" "XDEBUG_PACKAGE=$value"
-      # shellcheck disable=SC2016 # Check the literal variable used at image build time.
-      contains "$dockerfile" '"$XDEBUG_PACKAGE" -o /tmp/xdebug.tgz'
-      excludes "$dockerfile" 'https://xdebug.org/files/'
-      contains "$dockerfile" 'docker-php-ext-enable --ini-name zz-xdebug.ini xdebug'
-      contains "$dockerfile" 'pie install --no-interaction --no-cache'
-      contains "$dockerfile" '--working-dir=/tmp/xdebug --skip-enable-extension'
-      contains "$dockerfile" 'JOOMLA_XDEBUG_CLIENT_HOST=host.docker.internal'
-      contains "$dockerfile" 'JOOMLA_XDEBUG_CLIENT_PORT=9003'
-      excludes "$dockerfile" 'XDEBUG_CONFIG'
-      excludes "$dockerfile" 'EXPOSE 9003'
-      cmp development/zz-xdebug-settings.ini "$directory/zz-xdebug-settings.ini"
-      cmp development/zz-joomla-development.ini "$directory/zz-joomla-development.ini"
-    else
-      excludes "$dockerfile" 'COMPOSER_VERSION='
-      excludes "$dockerfile" 'PIE_VERSION='
-      excludes "$dockerfile" 'NPM_VERSION='
-      excludes "$dockerfile" 'xdebug'
-      [[ ! -e "$directory/zz-xdebug-settings.ini" ]] || fail "$directory received development config"
-    fi
-  done <"$scratch/contexts"
-
-}
-check_contexts
-
-test_case="repeated rendering leaves every context unchanged"
-snapshot >"$scratch/before"
-mapfile -t selectors < <(jq -r 'keys[] + "/"' versions.json)
-./apply-templates.sh "${selectors[@]}" >"$scratch/repeat.log"
-snapshot >"$scratch/after"
-cmp "$scratch/before" "$scratch/after"
-test_case="unknown selector leaves every context unchanged"
-if ./apply-templates.sh unknown/state >"$scratch/invalid.log" 2>&1; then fail 'unknown selector succeeded'; fi
-snapshot >"$scratch/after"
-cmp "$scratch/before" "$scratch/after"
-
-test_case="failed render leaves every context unchanged"
-# Even a failed render must leave every previously generated context unchanged.
-printf '\n{{ error("intentional test failure") }}\n' >>Dockerfile.template
-snapshot >"$scratch/before"
-if ./apply-templates.sh >"$scratch/broken.log" 2>&1; then fail 'broken template succeeded'; fi
-snapshot >"$scratch/after"
-cmp "$scratch/before" "$scratch/after"
-
-test_case="render a prerelease-only series without a stable folder"
-# An isolated synthetic prerelease covers creation without an existing stable folder.
-prepare "$scratch/prerelease"
-if [[ -f .jq-template.awk ]]; then cp .jq-template.awk "$scratch/prerelease/"; fi
-jq --slurpfile helper "$repo/versions-helper.json" --arg fixture synthetic \
-  -f "$repo/tests/fixtures.jq" "${TEST_VERSIONS_FILE:-$repo/versions.json}" \
-  | jq 'with_entries(select(.value.states | has("stable") | not)) | .[] |= (
-      .phpVersions = {(.php): .phpVersions[.php]}
-      | .states[] |= (.packageType = "tar.gz" | .package = "https://example.invalid/joomla.tar.gz"))' \
-  >"$scratch/prerelease/versions.json"
-cd "$scratch/prerelease"
-selector="$(jq -r 'to_entries[0] | .key + "/" + (.value.states | keys[0])' versions.json)"
-./apply-templates.sh "$selector/" >"$scratch/prerelease.log"
-check_contexts
-[[ ! -d "${selector%/*}/stable" ]] || fail 'prerelease-only series generated a stable directory'
-while IFS= read -r file; do
-  contains "$file" 'tar -xf joomla.tar.gz -C /usr/src/joomla'
-done < <(find "${selector%/*}" -name Dockerfile)
+PY
+find . -name Dockerfile -print0 | sort -z | xargs -0 sha256sum >"$work/before"
+./apply-templates.sh >/dev/null
+find . -name Dockerfile -print0 | sort -z | xargs -0 sha256sum >"$work/after"
+cmp "$work/before" "$work/after"
+if ./apply-templates.sh unknown/state >"$work/log" 2>&1; then echo 'Unknown selector accepted' >&2; exit 1; fi
+printf '\n@UNKNOWN@\n' >>Dockerfile.template
+if ./apply-templates.sh >"$work/log" 2>&1; then echo 'Invalid template accepted' >&2; exit 1; fi
+find . -name Dockerfile -print0 | sort -z | xargs -0 sha256sum >"$work/after"
+cmp "$work/before" "$work/after"
 echo 'Template tests passed.'

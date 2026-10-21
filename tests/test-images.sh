@@ -54,10 +54,12 @@ docker run --rm -e XDEBUG_MODE=coverage "$image" php -r '
 if (!in_array("coverage", xdebug_info("mode"), true)) { exit(1); }
 xdebug_start_code_coverage(); xdebug_stop_code_coverage();
 '
-test_case="Composer and PIE run as the web user in $image"
+test_case="Composer runs as the web user; temporary PIE has been removed in $image"
 docker run --rm --user www-data -e COMPOSER_HOME=/tmp/composer-home "$image" sh -ec '
   composer --version
-  pie --version --no-ansi
+  ! command -v pie
+  test ! -e /tmp/pie
+  test ! -d /tmp/joomla-pie
   cache=$(composer config --global cache-dir)
   mkdir -p "$cache"
   touch "$cache/write-test"
@@ -66,11 +68,10 @@ docker run --rm --user www-data -e COMPOSER_HOME=/tmp/composer-home "$image" sh 
 # Run a local npm project as the web user, with no registry or host tools needed.
 test_case="development tools and offline npm build in $image"
 docker run --rm --user www-data -e npm_config_cache=/tmp/npm-cache "$image" sh -ec '
-  for tool in git ssh patch zip unzip node npm npx python3 make g++ mariadb psql sqlite3 jq rsync less nano; do
+  for tool in git ssh patch zip unzip node npm npx python3 make g++ jq rsync less nano; do
     command -v "$tool" >/dev/null
   done
-  test "$(npm --version)" = "$NPM_VERSION"
-  test "$(npx --version)" = "$NPM_VERSION"
+  test "$(npx --version)" = "$(npm --version)"
   project=$(mktemp -d)
   mkdir -p "$npm_config_cache"
   cd "$project"
