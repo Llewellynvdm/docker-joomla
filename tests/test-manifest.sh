@@ -35,7 +35,7 @@ cd "$temporary/repository"
 # Parent image names come from JSON, including configured variant overrides.
 jq '
   to_entries[0].key as $series
-  | .[$series].php as $php
+  | (.[$series].states | to_entries[0].value.php) as $php
   | .[$series].variants[0] as $variant
   | .[$series].phpVersions[$php].variants[$variant].base += "-fixture"
 ' versions.json >"$temporary/configured.json"

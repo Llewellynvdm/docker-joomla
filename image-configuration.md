@@ -1,22 +1,60 @@
 # Image configuration
 
-`versions-helper.json` is the human-maintained input. `./update.sh` validates it,
+`versions-helper.json` is a small index with three paths:
+
+| Index key | Source |
+| --- | --- |
+| `archives` | `versions-helper/archives.json`: shared archive-format dependencies |
+| `phpVersions` | `versions-helper/php`: one complete PHP configuration per numeric version, such as `8.4.json` |
+| `joomlaVersions` | `versions-helper/joomla`: one Joomla release configuration per numeric series, such as `6.2.json` |
+
+`scripts/assemble-config.sh` discovers and sorts the numeric JSON filenames in
+those directories. New PHP versions and Joomla series do not need a hardcoded
+file list in the scripts. `./update.sh` assembles and validates the sources,
 resolves download checksums into `versions.json`, and runs `./build.sh` to generate
-the build contexts. Only `versions.json` is read during Dockerfile generation. Commit both the resolved
-file and generated contexts after reviewing an update. No hashes belong in the helper.
+the build contexts. Only the fully resolved `versions.json` is read during
+Dockerfile generation. Commit source changes, the resolved file and generated
+contexts together. No hashes belong in the index or its source files.
+Use `bash scripts/assemble-config.sh versions-helper.json` to inspect the
+assembled configuration without downloading artifacts.
 
-Each series selects release `states`, PHP versions, runtime variants and tag
-aliases. Each `phpVersions` entry describes its normal image. Its optional `dev`
-object adds development packages, extensions, tools, settings and environment
-values for that PHP version. Development availability has no fixed Joomla version
-threshold. The matching `variants` entry selects the PHP base image and command,
-and can supply distribution or server-specific settings.
+For routine maintenance:
 
-The merge order is PHP settings, `dev` when selected, then the selected variant.
-Objects merge by key, lists append with duplicates removed, and scalar values
-replace earlier values. Configuration files replace their complete line list at
-the same destination. To remove an inherited package, edit its defining list.
-There is no implicit package selection based on release numbers.
+- Bump a Joomla release by changing only its state's `version` in the matching
+  `versions-helper/joomla/` file. Its URL uses `{version}` automatically.
+- Add a Joomla series by creating its numbered JSON file in that directory and
+  setting its states, aliases and supported PHP versions. The index stays unchanged.
+- Change PHP packages or tool versions in the matching `versions-helper/php/`
+  file. Shared profiles update every Joomla series selecting that PHP version.
+- Add a PHP version by creating its numbered profile with the required base images
+  and selecting it in the appropriate Joomla series files.
+- Run `./update.sh`, review the resolved configuration and generated files, then
+  commit them together with the source changes.
+
+Each PHP source contains its complete image configuration, including optional
+`dev` additions and per-variant settings. Each Joomla source selects its default
+`variant`, supported `variants`, `phpVersions` and release `states`. Its
+`phpVersions` map selects the build matrix and can supply per-series overrides
+for a shared PHP profile. `development: true` selects the profile's development
+configuration; `development: false` removes it for that Joomla series.
+
+Each state supplies `version`, `aliases`, `packageType`, `php` and its package
+URL. The state's `php` chooses which PHP version receives its default aliases;
+it does not restrict the series' PHP build matrix. Development availability has
+no fixed Joomla version threshold.
+
+Assembly overlays the selection's optional `overrides` object on its shared PHP source.
+Objects merge recursively; override arrays and scalar values replace the source
+values. This permits replacing a package list for one Joomla series without
+duplicating the complete PHP profile.
+
+Dockerfile generation then merges PHP settings, `dev` when selected, and the
+selected variant. In this image-selection merge, objects merge by key, lists
+append with duplicates removed, and scalar values replace earlier values.
+Configuration files replace their complete line list at the same destination.
+To remove an inherited package, change its source list or replace that list in
+the series' PHP override. There is no implicit package selection based on release
+numbers.
 
 | Group | Meaning |
 | --- | --- |
@@ -35,6 +73,14 @@ There is no implicit package selection based on release numbers.
 | `environment` | Runtime environment defaults |
 | `variants` | Explicit base image, runtime command and variant settings |
 | `volume`, `workdir`, `entrypoint` | Docker runtime metadata |
+
+Source download URLs may contain the literal `{version}`, replaced with that
+download's version. Joomla package URLs also support `{packageType}` from the
+selected state. For example, a PIE URL can be
+`https://github.com/php/pie/releases/download/{version}/pie.phar`; changing its
+version field updates the resolved URL. These are fixed substitutions handled
+by shell and jq, not a generic template language. `versions.json` always contains
+the complete final URLs and their resolved hashes.
 
 Downloads support executable `binary` files and `tar.gz` archives extracted with
 one leading directory removed. `links` maps symlink destinations to their targets.
@@ -104,7 +150,7 @@ parses it with standard shell tools.
 Run the generator checks with:
 
 ```bash
-for test in config versions tags manifest build cleanup; do
+for test in assemble config versions tags manifest build cleanup; do
     ./tests/test-"$test".sh
 done
 ```

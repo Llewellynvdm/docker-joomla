@@ -23,7 +23,24 @@ if [ -z "$helper" ]; then
 fi
 work="$(mktemp -d .versions.XXXXXXXX)"
 trap 'rm -rf "$work"' EXIT
-jq --arg mode helper -f scripts/validate-config.jq "$helper" > "$work/helper.json"
+bash scripts/assemble-config.sh "$helper" > "$work/assembled.json"
+jq --arg mode helper -f scripts/validate-config.jq "$work/assembled.json" > "$work/validated.json"
+# Substitute only documented literal URL fields; no expressions or templates
+# are evaluated. Cache identities and the final snapshot always use full URLs.
+jq '
+    def url($version; $type):
+        split("{version}") | join($version)
+        | if $type != null then split("{packageType}") | join($type) else . end
+        | if test("[{}]") then error("unsupported URL placeholder: " + .) else . end;
+    with_entries(.value.states |= map_values(
+        . as $release | if .package != null then .package |= url($release.version; $release.packageType) else . end))
+    | reduce (paths(objects) | select(.[-2] == "download")) as $path (.;
+        getpath($path) as $item
+        | setpath($path + ["package"]; $item.package | url($item.version; null))
+        | if $item.checksum != null then
+            setpath($path + ["checksum"]; $item.checksum | url($item.version; null))
+          else . end)
+' "$work/validated.json" > "$work/helper.json"
 # Check every expanded tag before making network requests or replacing metadata.
 jq -f scripts/tags.jq "$work/helper.json" > /dev/null
 
@@ -128,14 +145,23 @@ declare -A artifactHashes=()
 while IFS=$'\t' read -r series path package checksumUrl; do
     key="$package"
     if [[ ! -v "artifactHashes[$key]" ]]; then
+        # A shared download belongs to every series referencing its URL. Decide
+        # selection before caching it, so source-file order cannot skip --force.
+        artifactSelected=false
+        while IFS= read -r artifactSeries; do
+            if selected "$artifactSeries"; then artifactSelected=true; break; fi
+        done < <(jq -r --arg package "$package" '
+            paths(objects) as $path | select($path[-2] == "download")
+            | select(getpath($path).package == $package) | $path[0]
+        ' "$work/helper.json")
         cached=
         if [[ -f versions.json ]]; then
             cached="$(jq -r --arg package "$package" '[.. | objects | select(.package? == $package) | .sha256? | select(type == "string" and test("^[a-fA-F0-9]{64}$"))][0] // ""' versions.json)"
         fi
-        if [[ -n "$cached" ]] && { ! $force || ! selected "$series"; }; then
+        if [[ -n "$cached" ]] && { ! $force || ! $artifactSelected; }; then
             artifactHashes[$key]="${cached,,}"
         else
-            if ! selected "$series"; then
+            if ! $artifactSelected; then
                 echo "Unresolved artifact $package for $series; include it or update all series." >&2
                 exit 1
             fi

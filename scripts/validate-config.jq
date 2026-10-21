@@ -56,8 +56,7 @@ require(type == "object" and length > 0; "configuration must contain at least on
     | require($series | test("^[0-9]+\\.[0-9]+$"); "invalid Joomla series: \($series)")
     | .value |= (
         require(type == "object"; "\($series): configuration must be an object")
-        | .packageType = (if .packageType == null then "tar.bz2" else .packageType end)
-        | require(.packageType | package_type; "\($series): unsupported packageType")
+        | require((has("php") or has("packageType")) | not; "\($series): php and packageType belong in each release state")
         | require(.archives | type == "object" and length > 0; "\($series): missing archive dependencies")
         | .archives |= with_entries(
             require(.key | package_type; "\($series): unsupported archive type")
@@ -67,10 +66,7 @@ require(type == "object" and length > 0; "configuration must contain at least on
                     require(.[$manager] | type == "array" and all(.[]; safe_name); "\($series): invalid archive package list"))
               )
           )
-        | require(.archives[.packageType] != null; "\($series): missing dependencies for selected packageType")
         | require(.phpVersions | type == "object" and length > 0; "\($series): phpVersions must be a nonempty object")
-        | require(.php | type == "string"; "\($series): php must be a string")
-        | require(.phpVersions[.php] != null; "\($series): default PHP must be in phpVersions")
         | .phpVersions |= with_entries(
             .key as $php
             | require($php | test("^[0-9]+\\.[0-9]+$"); "\($series): invalid PHP version \($php)")
@@ -104,7 +100,7 @@ require(type == "object" and length > 0; "configuration must contain at least on
         | .variant as $defaultVariant
         | require(.variants | index($defaultVariant) != null; "\($series): default variant must be in variants")
         | require(.states | type == "object" and length > 0; "\($series): states must be a nonempty object")
-        | .packageType as $packageType
+        | .phpVersions as $phpVersions
         | .archives as $archives
         | .states |= with_entries(
             .key as $state
@@ -120,7 +116,8 @@ require(type == "object" and length > 0; "configuration must contain at least on
                 | require(all(.aliases[]; type == "string" or (type == "number" and floor == .)); "\($series)/\($state): aliases must be strings or integer major versions")
                 | .aliases |= map(tostring)
                 | require(all(.aliases[]; length > 0); "\($series)/\($state): empty alias")
-                | .packageType = (if .packageType == null then $packageType else .packageType end)
+                | require(.php | type == "string"; "\($series)/\($state): php must be a string")
+                | require($phpVersions[.php] != null; "\($series)/\($state): default PHP must be in phpVersions")
                 | require(.packageType | package_type; "\($series)/\($state): unsupported packageType")
                 | require($archives[.packageType] != null; "\($series)/\($state): missing dependencies for selected packageType")
                 | if .package != null then

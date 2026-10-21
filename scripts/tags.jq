@@ -48,8 +48,10 @@ require(type == "object" and length > 0; "versions.json must contain configured 
         "\($series): variants must be a nonempty array")
     | require($settings.variant | type == "string";
         "\($series): default variant must be a string")
-    | require(($settings.phpVersions | has($settings.php)) and ($settings.variants | index($settings.variant)) != null;
-        "\($series): default PHP and variant must be configured")
+    | require(($settings.variants | index($settings.variant)) != null;
+        "\($series): default variant must be configured")
+    | require(($settings | has("php") or has("packageType")) | not;
+        "\($series): php and packageType belong in each release state")
     | require($settings.states | type == "object" and length > 0;
         "\($series): states must be a nonempty object")
     | require(all($settings.states | keys[]; . == "stable" or . == "alpha" or . == "beta" or . == "rc");
@@ -57,13 +59,15 @@ require(type == "object" and length > 0; "versions.json must contain configured 
     | ["stable", "alpha", "beta", "rc"][] as $state
     | select($settings.states | has($state))
     | $settings.states[$state] as $release
+    | require($release.php | type == "string"; "\($series)/\($state): php must be a string")
+    | require($settings.phpVersions | has($release.php); "\($series)/\($state): default PHP must be configured")
     | release_aliases($series; $state; $release) as $names
     | ($settings.phpVersions | keys | sort_by(split(".") | map(tonumber))[]) as $php
     | $settings.variants[] as $variant
     | require($php | test("^[0-9]+\\.[0-9]+$"); "\($series): invalid PHP version")
     | require($variant == "apache" or $variant == "fpm" or $variant == "fpm-alpine";
         "\($series): unsupported runtime variant")
-    | context_tags($names; $php; $variant; $php == $settings.php and $variant == $settings.variant) as $tags
+    | context_tags($names; $php; $variant; $php == $release.php and $variant == $settings.variant) as $tags
     | (if ($settings.phpVersions[$php].dev // null) == null then [false] else [false, true] end)[] as $development
     | {
         series: $series,
