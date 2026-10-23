@@ -175,7 +175,7 @@ docker volume create "$site_volume" >/dev/null
 docker volume create "$tls_volume" >/dev/null
 docker run -d --name "$web" --network "$network" \
   --mount "type=volume,src=$site_volume,dst=/var/www/html" \
-  --mount "type=volume,src=$tls_volume,dst=/var/www/joomla-db-tls" \
+  --mount "type=volume,src=$tls_volume,dst=/var/lib/joomla-db-tls" \
   -e JOOMLA_DB_HOST=db -e JOOMLA_DB_NAME=joomla -e JOOMLA_DB_USER=clientcert \
   -e JOOMLA_DB_PASSWORD=joomla-test-password -e JOOMLA_DB_ENCRYPTION=2 \
   -e "JOOMLA_DB_SSL_CA=$(<"$tmp/pki/ca.pem")" \
@@ -205,7 +205,7 @@ phase='recreating the installed site without reapplying TLS environment settings
 docker rm -f "$web" >/dev/null
 docker run -d --name "$web" --network "$network" \
   --mount "type=volume,src=$site_volume,dst=/var/www/html" \
-  --mount "type=volume,src=$tls_volume,dst=/var/www/joomla-db-tls" \
+  --mount "type=volume,src=$tls_volume,dst=/var/lib/joomla-db-tls" \
   -e JOOMLA_DB_ENCRYPTION=invalid -e JOOMLA_DB_SSL_CA_FILE=/does/not/exist \
   "$image" >/dev/null
 docker exec --user www-data "$web" php cli/joomla.php --no-interaction user:list >"$tmp/users"

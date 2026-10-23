@@ -150,7 +150,7 @@ helper currently supports `mysqli` and `pgsql`; the Compose example uses
 | `JOOMLA_DB_SSL_KEY` / `JOOMLA_DB_SSL_KEY_FILE` | Unencrypted client private key as PEM text, or the path to its file; mode `2` only |
 | `JOOMLA_DB_SSL_VERIFY_SERVER_CERT` | `1` (default for modes `1` and `2`) verifies the database server; `0` explicitly disables verification |
 | `JOOMLA_DB_SSL_CIPHER` | Optional cipher list for `mysqli` mode `2`; otherwise leave unset |
-| `JOOMLA_DB_SSL_DIR` | Directory for files created from inline PEM values; defaults to `/var/www/joomla-db-tls`; persist it separately from the webroot |
+| `JOOMLA_DB_SSL_DIR` | Directory for files created from inline PEM values; defaults to `/var/lib/joomla-db-tls`; persist it separately from the webroot |
 | `JOOMLA_SITE_NAME` | Site name for automatic installation; longer than two characters |
 | `JOOMLA_ADMIN_USER` | Administrator display name; longer than two characters |
 | `JOOMLA_ADMIN_USERNAME` | Administrator login name; nonempty and alphabetic only |
@@ -208,8 +208,9 @@ root startup, use a root-owned `0640` file with the worker's primary group.
 For non-root startup, use a worker-owned `0600` key. Generated keys receive
 these permissions automatically.
 
-Inline PEM values are written to protected files outside the webroot. Their
-absolute paths are exported as `JOOMLA_DB_SSL_CA_FILE`,
+Inline PEM values are written to protected files in `/var/lib/joomla-db-tls`
+by default, separate from `/var/www`. Their absolute paths are exported as
+`JOOMLA_DB_SSL_CA_FILE`,
 `JOOMLA_DB_SSL_CERT_FILE` and `JOOMLA_DB_SSL_KEY_FILE` as applicable, so the
 database helper and Joomla installer use the same material. These exports are
 made inside the startup process; they do not change the host's environment.
@@ -219,10 +220,13 @@ authority, issue certificates or configure the database server's trust.
 Joomla saves the certificate paths in `configuration.php`. Keep mounted secrets
 at those paths for every subsequent start. If using inline PEM, mount a
 persistent volume at `JOOMLA_DB_SSL_DIR`, for example
-`joomla-db-tls:/var/www/joomla-db-tls`, and retain it with the site volume.
+`joomla-db-tls:/var/lib/joomla-db-tls`, and retain it with the site volume.
 Existing-site startup does not recreate these files from environment values.
 The directory must be empty or already private (`0700`) and owned by the
 worker; its parent must exist. Use a separate directory for each site.
+For non-root startup, precreate or mount this directory with worker ownership
+and `0700` permissions, or set `JOOMLA_DB_SSL_DIR` to a writable location
+outside the webroot.
 
 Verification defaults to `1`. The server certificate must identify the hostname
 in `JOOMLA_DB_HOST`; use the Compose service hostname rather than `localhost`.

@@ -244,7 +244,7 @@ joomla_db_ssl_file() {
         if [[ $path != /* ]]; then path="$PWD/$path"; fi
     else
         [[ -n ${!name:-} ]] || joomla_die "Set $name or $file_name for database TLS."
-        directory="${JOOMLA_DB_SSL_DIR:-/var/www/joomla-db-tls}"
+        directory="${JOOMLA_DB_SSL_DIR:-/var/lib/joomla-db-tls}"
         [[ $directory == /* && ! -L $directory ]] ||
             joomla_die 'JOOMLA_DB_SSL_DIR must be an absolute directory, not a symlink.'
         if [[ -d $directory ]]; then

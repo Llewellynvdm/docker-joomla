@@ -255,7 +255,7 @@ manifest does not publish an image.
 | Manifest reports an untracked or dirty context | Commit the generated context, including its copied runtime files, before running `release.sh`. |
 | Container cannot connect to the database | Check host/port, network, credentials, readiness and database permissions; inspect `docker compose logs`. |
 | A new TLS deployment fails | Check the CA, server certificate hostname, file readability, key/certificate pair and server TLS requirements. Both database preparation and Joomla must use the same settings. See [Database connection encryption](usage.md#database-connection-encryption). |
-| TLS works until the Joomla container is recreated | Retain mounted certificate paths or the persistent `JOOMLA_DB_SSL_DIR` volume. Existing-site startup does not recreate inline PEM files. |
+| TLS works until the Joomla container is recreated | Retain mounted certificate paths or the persistent `JOOMLA_DB_SSL_DIR` volume (default `/var/lib/joomla-db-tls`). Existing-site startup does not recreate inline PEM files. |
 | A new container still serves the old Joomla release | Inspect the persistent site volume. Image replacement does not overwrite an installed site. See [Using the images](usage.md). |
 | Xdebug loads but the IDE does not stop | Check the trigger, outbound address/port, listener and path mappings using [Development images](development.md#check-an-ide-connection). |
 
