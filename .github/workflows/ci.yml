@@ -70,7 +70,7 @@ jobs:
       - name: Prepare runtime tests
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libfcgi-bin
+          sudo apt-get install -y --no-install-recommends libfcgi-bin openssl
           git clone --depth 1 https://github.com/docker-library/official-images.git "$RUNNER_TEMP/official-images"
       - name: Build image
         env:
@@ -94,6 +94,12 @@ jobs:
           IMAGE: ${{ matrix.image }}
           VARIANT: ${{ matrix.variant }}
         run: ./tests/test-joomla.sh "$IMAGE" "$VARIANT"
+      - name: Verify database TLS and initial deployment
+        if: matrix.latest
+        timeout-minutes: 10
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: ./tests/test-database-tls.sh "$IMAGE"
       - name: Image history
         if: always()
         env:

@@ -13,8 +13,8 @@ repository root unless stated otherwise.
 ## Host requirements
 
 Generation uses Bash, jq, curl and standard Linux utilities, including GNU
-coreutils, findutils, awk, sed and grep. Tests also use Git. ShellCheck checks
-the generator and test scripts. No Python interpreter or template engine is
+coreutils, findutils, awk, sed and grep. Tests also use Git and OpenSSL.
+ShellCheck checks the generator, entrypoint and test scripts. No Python interpreter or template engine is
 needed to generate Dockerfiles.
 
 On a Debian-based development host, install the generator and test tools with:
@@ -22,7 +22,7 @@ On a Debian-based development host, install the generator and test tools with:
 ```bash
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
-  bash jq curl git coreutils findutils gawk sed grep shellcheck
+  bash jq curl git coreutils findutils gawk sed grep shellcheck openssl
 ```
 
 Actual image tests require a working Docker daemon running Linux containers.
@@ -53,8 +53,8 @@ not for the generator tests or the direct Docker runtime test scripts.
 ## Check the generators
 
 ```bash
-shellcheck generate.sh release.sh src/build/*.sh src/build/lib/*.sh tests/*.sh
-for suite in assemble generate config versions tags manifest build cleanup; do
+shellcheck generate.sh release.sh src/build/*.sh src/build/lib/*.sh src/runtime/*.sh tests/*.sh
+for suite in assemble generate config versions tags manifest build cleanup entrypoint; do
   "./tests/test-$suite.sh" || exit 1
 done
 ```
@@ -74,6 +74,7 @@ host.
 | `test-manifest.sh` | Publication metadata, architecture parsing, selected contexts and committed-context checks |
 | `test-build.sh` | Dockerfile contents, runtime file copies, installation/check/cleanup order, quoting and deterministic generation |
 | `test-cleanup.sh` | Debian and Alpine dependency retention and removal behaviour |
+| `test-entrypoint.sh` | Initial automatic-deployment TLS selection, secret materialization and exports, installer arguments, validation failures, and browser/existing-site isolation |
 
 Inspect assembled inputs without downloading artifacts:
 
@@ -120,6 +121,7 @@ docker build --pull --progress=plain --tag "$image" "$directory" \
   2>&1 | tee /tmp/joomla-candidate-build.log
 ./tests/test-images.sh "$image" "$variant" "$development"
 ./tests/test-joomla.sh "$image" "$variant"
+./tests/test-database-tls.sh "$image"
 docker history "$image"
 )
 ```
@@ -132,7 +134,8 @@ and host architecture. The next run replaces this candidate tag and log.
 
 The first test checks PHP modules and the tooling appropriate to that image.
 The second starts a disposable database and verifies an actual Joomla install,
-page request and CLI command. This can also expose release-specific Joomla
+page request and CLI command. The third checks database TLS with disposable
+certificates and databases. These checks can also expose release-specific Joomla
 compatibility problems that a successful Docker build cannot detect. The
 scripts remove their temporary containers and networks, while the local image
 and build log remain available for inspection.
@@ -164,6 +167,7 @@ while IFS= read -r context; do
   ./tests/test-images.sh "$image" "$variant" "$development"
   if jq -e '.tags | index("latest") != null' <<<"$context" > /dev/null; then
     ./tests/test-joomla.sh "$image" "$variant"
+    ./tests/test-database-tls.sh "$image"
   fi
 done < <(jq -c '.[]' "$plan_file")
 )
@@ -188,6 +192,12 @@ CLI as the web user. The database image reference is maintained in that test
 script. CI runs this installation check for the context owning `latest`; it does
 not install every prerelease against every supported database.
 
+`test-database-tls.sh` exercises verified and mutual TLS against MariaDB and PostgreSQL,
+rejects invalid trust, hostname and non-TLS connections, and verifies an actual
+automatic Joomla installation and its worker CLI. It uses disposable test
+certificates created with OpenSSL. CI runs it for the context owning `latest`,
+using the generated context plan rather than a hardcoded Joomla/PHP version.
+
 To investigate a failed matrix entry, use its directory with the single-candidate
 recipe above. Read the first relevant compiler, installer or runtime failure in
 the saved log; the final Docker exit message usually only reports that the
@@ -196,7 +206,7 @@ earlier command failed.
 ## What the workflows enforce
 
 [`verify-build.yml`](../.github/workflows/verify-build.yml) runs ShellCheck and
-the generator suites, then regenerates the configured outputs. It rejects
+the generator and entrypoint suites, then regenerates the configured outputs. It rejects
 uncommitted differences in `conf/versions.json` and the active image contexts.
 Commit edited source configuration, the resolved file and generated contexts
 together.
@@ -204,7 +214,7 @@ together.
 [`ci.yml`](../.github/workflows/ci.yml) creates its matrix from the shared
 context plan, checks deterministic generation, builds every configured image,
 runs the Docker Official Images tests and this repository's runtime tests, and
-runs the Joomla installation check for `latest`. A scheduled run also detects
+runs the Joomla installation and database TLS checks for `latest`. A scheduled run also detects
 changes in mutable parent images or distribution packages.
 
 The publication manifest requires committed, clean contexts. After committing,
@@ -244,6 +254,8 @@ manifest does not publish an image.
 | Generated-output check fails in CI | Run `./generate.sh`, inspect `git diff`, and commit both configuration and generated output. Do not edit Dockerfiles directly. |
 | Manifest reports an untracked or dirty context | Commit the generated context, including its copied runtime files, before running `release.sh`. |
 | Container cannot connect to the database | Check host/port, network, credentials, readiness and database permissions; inspect `docker compose logs`. |
+| A new TLS deployment fails | Check the CA, server certificate hostname, file readability, key/certificate pair and server TLS requirements. Both database preparation and Joomla must use the same settings. See [Database connection encryption](usage.md#database-connection-encryption). |
+| TLS works until the Joomla container is recreated | Retain mounted certificate paths or the persistent `JOOMLA_DB_SSL_DIR` volume. Existing-site startup does not recreate inline PEM files. |
 | A new container still serves the old Joomla release | Inspect the persistent site volume. Image replacement does not overwrite an installed site. See [Using the images](usage.md). |
 | Xdebug loads but the IDE does not stop | Check the trigger, outbound address/port, listener and path mappings using [Development images](development.md#check-an-ide-connection). |
 

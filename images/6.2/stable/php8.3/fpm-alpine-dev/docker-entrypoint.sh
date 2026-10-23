@@ -209,6 +209,138 @@ joomla_prepare_environment() {
         joomla_die 'JOOMLA_DB_TYPE must be mysqli or pgsql.'
 }
 
+# Only called for a new unattended installation. PEM values become files;
+# mounted files remain mounted, and the normalized paths are exported for PHP.
+joomla_db_ssl_check_access() {
+    local original="$1" path owner file_group permissions shift required
+    # Non-root bootstrap already runs as the worker. Root must check the
+    # worker's UID/primary GID as well, including traversal of secret symlinks.
+    [[ $uid == 0 ]] || return 0
+    for path in "$original" "$(readlink -f -- "$original")"; do
+        required=4
+        while :; do
+            read -r owner file_group permissions < <(stat -L -c '%u %g %a' -- "$path")
+            shift=0
+            if [[ $owner == "$user" ]]; then shift=6; elif [[ $file_group == "$group" ]]; then shift=3; fi
+            (( ((8#$permissions >> shift) & required) == required )) ||
+                joomla_die "Database TLS path $path must be accessible to the Joomla worker $user:$group."
+            [[ $path != / ]] || break
+            path="$(dirname -- "$path")"
+            required=1
+        done
+    done
+}
+
+joomla_db_ssl_file() {
+    local name="$1" file_name="${1}_FILE" path directory
+    if [[ ${!name+x} && ${!file_name+x} ]]; then
+        joomla_die "Set either $name or $file_name, not both."
+    fi
+    if [[ ${!file_name+x} ]]; then
+        path="${!file_name}"
+        [[ -n $path && -f $path && -r $path && -s $path ]] ||
+            joomla_die "$file_name must name a nonempty readable regular file."
+        # Keep the stable mount path when a secret points to a rotated file.
+        if [[ $path != /* ]]; then path="$PWD/$path"; fi
+    else
+        [[ -n ${!name:-} ]] || joomla_die "Set $name or $file_name for database TLS."
+        directory="${JOOMLA_DB_SSL_DIR:-/var/www/joomla-db-tls}"
+        [[ $directory == /* && ! -L $directory ]] ||
+            joomla_die 'JOOMLA_DB_SSL_DIR must be an absolute directory, not a symlink.'
+        if [[ -d $directory ]]; then
+            directory="$(cd -- "$directory" && pwd -P)"
+        else
+            # cd/pwd also works with BusyBox; the parent must already exist.
+            directory="$(cd -- "$(dirname -- "$directory")" && printf '%s/%s' "$(pwd -P)" "$(basename -- "$directory")")" ||
+                joomla_die 'The parent of JOOMLA_DB_SSL_DIR must exist.'
+        fi
+        [[ $directory != / && $directory != "$JOOMLA_WEBROOT" && $directory != "$JOOMLA_WEBROOT/"* ]] ||
+            joomla_die 'JOOMLA_DB_SSL_DIR must be outside the webroot.'
+        if [[ ! -d $directory ]] || [[ -z $(find "$directory" -mindepth 1 -maxdepth 1 -print -quit) ]]; then
+            (umask 077; mkdir -p -- "$directory")
+            chmod 0700 -- "$directory"
+            if [[ $uid == 0 ]]; then chown "$user:$group" "$directory"; fi
+        fi
+        [[ $(stat -c '%u:%a' -- "$directory") == "$user:700" ]] ||
+            joomla_die 'JOOMLA_DB_SSL_DIR must be an empty directory or a private directory owned by the Joomla worker.'
+        path="$directory/${name#JOOMLA_DB_SSL_}.pem"
+        [[ ! -L $path ]] || joomla_die "Refusing a symlink for $file_name."
+        if [[ -e $path ]]; then
+            [[ -f $path && -r $path ]] || joomla_die "Invalid existing file for $file_name."
+            cmp -s -- "$path" <(printf '%s\n' "${!name}") ||
+                joomla_die "$file_name already exists with different contents; use a separate TLS directory for each site."
+        else
+            # noclobber prevents following a file/symlink created concurrently.
+            (umask 077; set -o noclobber; printf '%s\n' "${!name}" > "$path") ||
+                joomla_die "Cannot create $file_name."
+        fi
+        chmod 0600 -- "$path"
+        if [[ $uid == 0 ]]; then
+            if [[ $name == JOOMLA_DB_SSL_KEY && $JOOMLA_DB_TYPE == pgsql ]]; then
+                # libpq accepts root-owned 0640 for both bootstrap and workers.
+                chown "0:$group" "$path"
+                chmod 0640 -- "$path"
+            else
+                chown "$user:$group" "$path"
+            fi
+        fi
+        export JOOMLA_DB_SSL_DIR="$directory"
+        unset "$name"
+    fi
+    joomla_db_ssl_check_access "$path"
+    printf -v "$file_name" '%s' "$path"
+    export "${file_name?}"
+}
+
+joomla_prepare_db_encryption() {
+    local mode="${JOOMLA_DB_ENCRYPTION-auto}" supplied=false client=false name
+    joomla_db_encryption_args=(--db-encryption=0)
+    case "$mode" in
+        0) export JOOMLA_DB_ENCRYPTION=0; return 0 ;;
+        auto | 1 | 2) ;;
+        *) joomla_die 'JOOMLA_DB_ENCRYPTION must be auto, 0, 1 or 2.' ;;
+    esac
+    for name in JOOMLA_DB_SSL_CA JOOMLA_DB_SSL_CA_FILE JOOMLA_DB_SSL_CERT JOOMLA_DB_SSL_CERT_FILE \
+        JOOMLA_DB_SSL_KEY JOOMLA_DB_SSL_KEY_FILE JOOMLA_DB_SSL_VERIFY_SERVER_CERT JOOMLA_DB_SSL_CIPHER; do
+        if [[ ${!name+x} ]]; then supplied=true; fi
+    done
+    for name in JOOMLA_DB_SSL_CERT JOOMLA_DB_SSL_CERT_FILE JOOMLA_DB_SSL_KEY JOOMLA_DB_SSL_KEY_FILE; do
+        if [[ ${!name+x} ]]; then client=true; fi
+    done
+    if [[ $mode == auto ]]; then
+        mode=0
+        if [[ $client == true ]]; then mode=2; elif [[ $supplied == true ]]; then mode=1; fi
+    fi
+    export JOOMLA_DB_ENCRYPTION="$mode"
+    [[ $mode != 0 ]] || return 0
+    export JOOMLA_DB_SSL_VERIFY_SERVER_CERT="${JOOMLA_DB_SSL_VERIFY_SERVER_CERT-1}"
+    case "$JOOMLA_DB_SSL_VERIFY_SERVER_CERT" in
+        0 | 1) ;;
+        *) joomla_die 'JOOMLA_DB_SSL_VERIFY_SERVER_CERT must be 0 or 1.' ;;
+    esac
+    [[ $mode != 1 || $client == false ]] || joomla_die 'Client certificate and key settings require JOOMLA_DB_ENCRYPTION=2.'
+    if [[ ${JOOMLA_DB_SSL_CIPHER+x} ]]; then
+        [[ -n $JOOMLA_DB_SSL_CIPHER && $mode == 2 && $JOOMLA_DB_TYPE == mysqli ]] ||
+            joomla_die 'JOOMLA_DB_SSL_CIPHER requires mysqli and encryption mode 2.'
+        export JOOMLA_DB_SSL_CIPHER
+    fi
+    joomla_db_encryption_args=("--db-encryption=$mode" "--db-sslverifyservercert=$JOOMLA_DB_SSL_VERIFY_SERVER_CERT")
+    if [[ $JOOMLA_DB_SSL_VERIFY_SERVER_CERT == 1 ]]; then
+        joomla_db_ssl_file JOOMLA_DB_SSL_CA
+        joomla_db_encryption_args+=("--db-sslca=$JOOMLA_DB_SSL_CA_FILE")
+    elif [[ ${JOOMLA_DB_SSL_CA+x} || ${JOOMLA_DB_SSL_CA_FILE+x} ]]; then
+        joomla_die 'CA settings require JOOMLA_DB_SSL_VERIFY_SERVER_CERT=1.'
+    fi
+    if [[ $mode == 2 ]]; then
+        joomla_db_ssl_file JOOMLA_DB_SSL_CERT
+        joomla_db_ssl_file JOOMLA_DB_SSL_KEY
+        joomla_db_encryption_args+=("--db-sslcert=$JOOMLA_DB_SSL_CERT_FILE" "--db-sslkey=$JOOMLA_DB_SSL_KEY_FILE")
+        if [[ -n ${JOOMLA_DB_SSL_CIPHER:-} ]]; then
+            joomla_db_encryption_args+=("--db-sslcipher=$JOOMLA_DB_SSL_CIPHER")
+        fi
+    fi
+}
+
 joomla_copy_files() {
     local -a source_args=(--create --file - --directory "$joomla_source" --one-file-system)
     local -a target_args=(--extract --file - --no-overwrite-dir)
@@ -294,7 +426,7 @@ joomla_install() {
         "--db-pass=$JOOMLA_DB_PASSWORD"
         "--db-user=$JOOMLA_DB_USER"
         "--db-prefix=${JOOMLA_DB_PREFIX:-joom_}"
-        --db-encryption=0
+        "${joomla_db_encryption_args[@]}"
     )
     if php "$JOOMLA_WEBROOT/installation/joomla.php" install "${install_args[@]}"; then
         [[ -s configuration.php && ! -L configuration.php ]] ||
@@ -340,9 +472,10 @@ joomla_initialization_exit() {
 }
 
 joomla_initialize() {
-    local auto_install=false copy_source=false name value status
+    local auto_install=false copy_source=false name value status db_encryption=0
     # shellcheck disable=SC2034 # Receives validated values through a nameref.
     local -a checked_entries=()
+    local -a database_args=()
     joomla_prepare_environment
     if joomla_can_auto_deploy; then
         auto_install=true
@@ -368,9 +501,16 @@ joomla_initialize() {
         copy_source=true
     fi
 
+    if [[ $auto_install == true ]]; then
+        joomla_prepare_db_encryption
+        db_encryption="$JOOMLA_DB_ENCRYPTION"
+    fi
+
     # Database readiness is retryable and does not modify the Joomla tree.
     # Do this before arming the marker so a temporary DB outage can recover.
-    if php /makedb.php "$JOOMLA_DB_HOST" "$JOOMLA_DB_USER" "$JOOMLA_DB_PASSWORD" "$JOOMLA_DB_NAME" "$JOOMLA_DB_TYPE"; then
+    database_args=("$JOOMLA_DB_HOST" "$JOOMLA_DB_USER" "$JOOMLA_DB_PASSWORD" "$JOOMLA_DB_NAME" "$JOOMLA_DB_TYPE")
+    if [[ $db_encryption != 0 ]]; then database_args+=("$db_encryption"); fi
+    if php /makedb.php "${database_args[@]}"; then
         :
     else
         status=$?

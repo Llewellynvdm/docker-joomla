@@ -144,10 +144,18 @@ helper currently supports `mysqli` and `pgsql`; the Compose example uses
 | `JOOMLA_DB_PASSWORD_ALLOW_EMPTY` | Only the value `yes` allows an empty password |
 | `JOOMLA_DB_TYPE` | `mysqli` or `pgsql`; defaults to `mysqli` |
 | `JOOMLA_DB_PREFIX` | Table prefix for automatic installation; defaults to `joom_` |
+| `JOOMLA_DB_ENCRYPTION` | Initial automatic installation only: `auto` (default), `0`, `1` or `2`; see [Database connection encryption](#database-connection-encryption) |
+| `JOOMLA_DB_SSL_CA` / `JOOMLA_DB_SSL_CA_FILE` | Trusted CA certificate as PEM text, or the path to its file |
+| `JOOMLA_DB_SSL_CERT` / `JOOMLA_DB_SSL_CERT_FILE` | Client certificate as PEM text, or the path to its file; mode `2` only |
+| `JOOMLA_DB_SSL_KEY` / `JOOMLA_DB_SSL_KEY_FILE` | Unencrypted client private key as PEM text, or the path to its file; mode `2` only |
+| `JOOMLA_DB_SSL_VERIFY_SERVER_CERT` | `1` (default for modes `1` and `2`) verifies the database server; `0` explicitly disables verification |
+| `JOOMLA_DB_SSL_CIPHER` | Optional cipher list for `mysqli` mode `2`; otherwise leave unset |
+| `JOOMLA_DB_SSL_DIR` | Directory for files created from inline PEM values; defaults to `/var/www/joomla-db-tls`; persist it separately from the webroot |
 | `JOOMLA_SITE_NAME` | Site name for automatic installation; longer than two characters |
 | `JOOMLA_ADMIN_USER` | Administrator display name; longer than two characters |
 | `JOOMLA_ADMIN_USERNAME` | Administrator login name; nonempty and alphabetic only |
 | `JOOMLA_ADMIN_PASSWORD` | Administrator password; longer than twelve characters |
+| `JOOMLA_ADMIN_PASSWORD_FILE` | Read the administrator password from a mounted file |
 | `JOOMLA_ADMIN_EMAIL` | Administrator email address, validated by the entrypoint |
 | `JOOMLA_EXTENSIONS_URLS` | Semicolon-separated extension package URLs, processed after successful automatic installation |
 | `JOOMLA_EXTENSIONS_PATHS` | Semicolon-separated extension package paths inside the container, processed after successful automatic installation |
@@ -168,8 +176,114 @@ such as `JOOMLA_VERSION` describes the packaged release, not necessarily the
 version currently installed in a persistent site volume.
 
 For file-based database credentials, mount a readable secret and set
-`JOOMLA_DB_PASSWORD_FILE` to its container path. That variable is supported for
-the database password; it is not a general `_FILE` mechanism for every setting.
+`JOOMLA_DB_PASSWORD_FILE` to its container path. File inputs are supported for
+the database password, administrator password and TLS material listed above;
+`_FILE` is not a general mechanism for every setting.
+
+## Database connection encryption
+
+This feature configures TLS for a **new, automatic installation**. Supply all
+five site/administrator settings as well as the database settings. Browser
+installation and existing sites ignore these TLS environment settings; they
+do not configure or migrate an existing `configuration.php`.
+
+| Encryption setting | Behaviour |
+| --- | --- |
+| `auto`, without TLS inputs | Uses Joomla mode `0`, preserving its server-controlled default |
+| `auto`, with a CA or other TLS setting | Selects mode `1`, server-authenticated TLS |
+| `auto`, with a client certificate or key | Selects mode `2`, mutual TLS; both client files are required |
+| `0` | Ignores TLS settings and creates no TLS files |
+| `1` | Requires TLS; with verification enabled, requires a CA certificate |
+| `2` | Requires TLS and a matching client certificate/private key; with verification enabled, also requires a CA certificate |
+
+`JOOMLA_DB_SSL_DIR` alone does not enable TLS. Explicitly empty or incomplete
+TLS inputs fail validation when TLS is active. A failed TLS connection never
+causes a retry without TLS. Only modes `1` and `2` add Joomla's `--db-ssl*`
+installer arguments and configure TLS for the database creation helper.
+
+Use either a PEM value or its `_FILE` alternative, not both. Mounted files and
+their parent directories must permit access by both the startup process and
+the Joomla worker UID or primary GID. For a PostgreSQL client private key with
+root startup, use a root-owned `0640` file with the worker's primary group.
+For non-root startup, use a worker-owned `0600` key. Generated keys receive
+these permissions automatically.
+
+Inline PEM values are written to protected files outside the webroot. Their
+absolute paths are exported as `JOOMLA_DB_SSL_CA_FILE`,
+`JOOMLA_DB_SSL_CERT_FILE` and `JOOMLA_DB_SSL_KEY_FILE` as applicable, so the
+database helper and Joomla installer use the same material. These exports are
+made inside the startup process; they do not change the host's environment.
+The image materializes supplied PEM; it does not generate a new certificate
+authority, issue certificates or configure the database server's trust.
+
+Joomla saves the certificate paths in `configuration.php`. Keep mounted secrets
+at those paths for every subsequent start. If using inline PEM, mount a
+persistent volume at `JOOMLA_DB_SSL_DIR`, for example
+`joomla-db-tls:/var/www/joomla-db-tls`, and retain it with the site volume.
+Existing-site startup does not recreate these files from environment values.
+The directory must be empty or already private (`0700`) and owned by the
+worker; its parent must exist. Use a separate directory for each site.
+
+Verification defaults to `1`. The server certificate must identify the hostname
+in `JOOMLA_DB_HOST`; use the Compose service hostname rather than `localhost`.
+Setting verification to `0` removes server identity verification and cannot be
+combined with a CA input. Keep verification enabled for normal deployment.
+Mode `1` does not accept client credentials, and a cipher list is accepted only
+for `mysqli` mode `2`.
+
+The database server must already support TLS and have its own certificate and
+private key. For MySQL/MariaDB, require encrypted connections using
+`require_secure_transport=ON` or a `REQUIRE SSL` rule on the Joomla database
+account. For mutual TLS, also configure the server to trust the client
+certificate issuer and require a client certificate, for example using
+`REQUIRE X509` in MySQL/MariaDB. Database passwords are still supplied
+separately. These settings encrypt connections, not stored
+database files or backups.
+
+For verified TLS with the earlier Compose example, prepare `ca.pem`,
+`server-cert.pem` and `server-key.pem` in `database-tls/`. The server certificate
+must cover the DNS name `database`, and the MariaDB process must be able to read
+its key. Save the following as `compose.tls.yaml` before the site's first start:
+
+```yaml
+services:
+  database:
+    command:
+      - --ssl-ca=/etc/mysql/tls/ca.pem
+      - --ssl-cert=/etc/mysql/tls/server-cert.pem
+      - --ssl-key=/etc/mysql/tls/server-key.pem
+      - --require-secure-transport=ON
+    volumes:
+      - ./database-tls:/etc/mysql/tls:ro
+
+  joomla:
+    environment:
+      JOOMLA_SITE_NAME: ${JOOMLA_SITE_NAME:?Set JOOMLA_SITE_NAME}
+      JOOMLA_ADMIN_USER: ${JOOMLA_ADMIN_USER:?Set JOOMLA_ADMIN_USER}
+      JOOMLA_ADMIN_USERNAME: ${JOOMLA_ADMIN_USERNAME:?Set JOOMLA_ADMIN_USERNAME}
+      JOOMLA_ADMIN_PASSWORD: ${JOOMLA_ADMIN_PASSWORD:?Set JOOMLA_ADMIN_PASSWORD}
+      JOOMLA_ADMIN_EMAIL: ${JOOMLA_ADMIN_EMAIL:?Set JOOMLA_ADMIN_EMAIL}
+      JOOMLA_DB_ENCRYPTION: "1"
+      JOOMLA_DB_SSL_CA_FILE: /run/secrets/database_ca
+    secrets:
+      - database_ca
+
+secrets:
+  database_ca:
+    file: ./database-tls/ca.pem
+```
+
+Set the five site/administrator variables in `.env` or the host environment,
+then start with both files:
+
+```bash
+docker compose -f compose.yaml -f compose.tls.yaml up -d
+```
+
+Keep using both files when recreating the services so the CA secret remains
+mounted. For mode `2`, additionally mount the client certificate and private key
+into Joomla, set their `_FILE` variables, and configure the database account to
+require the client certificate.
 
 ## Run Joomla CLI commands
 
